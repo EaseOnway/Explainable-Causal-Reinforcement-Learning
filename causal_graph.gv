@@ -1,0 +1,21 @@
+digraph {
+	"payment(new)"
+	"age(new)"
+	reward
+	age
+	payment
+	work
+	"money(new)"
+	play
+	"happy(new)"
+	happy
+	money
+	work -> "payment(new)"
+	age -> "age(new)"
+	"money(new)" -> reward
+	"happy(new)" -> reward
+	money -> "money(new)"
+	payment -> "money(new)"
+	work -> "money(new)"
+	play -> "happy(new)"
+}
