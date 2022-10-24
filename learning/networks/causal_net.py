@@ -11,7 +11,7 @@ from .base import BaseNN
 from .encoding import VariableEncoder
 from .inferrer import Inferrer, StateKey
 from .config import *
-from .utils import safe_stack
+import utils as u
 
 
 class CausalNet(BaseNN):
@@ -33,7 +33,8 @@ class CausalNet(BaseNN):
         self.k_model = StateKey(config)
 
         for key in config.outkeys:
-            self.inferrers[key] = Inferrer(self.config.var(key).size, config)
+            var = self.config.var(key)
+            self.inferrers[key] = Inferrer(var.shape, config, var.categorical)
             self.add_module(f'{key}_inferrer', self.inferrers[key])
 
         # init parameters
@@ -66,17 +67,17 @@ class CausalNet(BaseNN):
         except StopIteration:
             raise ValueError("data is empty")
 
-        actions = self.action_encoder.forward(datadic)
-        states = self.state_encoder.forward(datadic)
+        actions = self.action_encoder.forward_all(datadic)
+        states = self.state_encoder.forward_all(datadic)
 
         outs: Dict[str, torch.Tensor] = {}
 
         for var in self.config.outkeys:
             parents_a = self.parent_dic_a[var]
             parents_s = self.parent_dic_s[var]
-            actions_pa = safe_stack([actions[pa] for pa in parents_a],
+            actions_pa = u.safe.stack([actions[pa] for pa in parents_a],
                                     (batchsize, self.dims.a), **self.torchargs)
-            states_pa = safe_stack([states[pa] for pa in parents_s],
+            states_pa = u.safe.stack([states[pa] for pa in parents_s],
                                    (batchsize, self.dims.s), **self.torchargs)
             k_states = self.k_model.forward(parents_s)
             inferrer = self.inferrers[var]
@@ -87,23 +88,16 @@ class CausalNet(BaseNN):
 
     def errors(self, data_dic: Dict[str, np.ndarray]):
         errors: Dict[str, torch.Tensor] = {}
-
         predicted = self.forward(data_dic)
         for key, pred in predicted.items():
+            inferrer = self.inferrers[key]
             target = data_dic[key]
-            target = torch.from_numpy(target).to(
-                **self.torchargs).view(target.shape[0], -1)
-            errors[key] = torch.mean(torch.square(target - pred))
+            errors[key] = inferrer.error(pred, target)
         return errors
 
     def loss(self, errors: Dict[str, torch.Tensor]):
-        s = 0
-        errs = []
-        for key, err in errors.items():
-            size = self.config.var(key).size
-            s += size
-            errs.append(err * size)
-        return torch.sum(torch.stack(errs))/s
+        errs = [err for err in errors.values()]
+        return torch.sum(torch.stack(errs))
 
     def get_attn_dic(self):
         out: Dict[str, np.ndarray] = {}

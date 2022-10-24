@@ -6,6 +6,7 @@ import numpy as np
 from .config import NetConfig
 from .encoding import Aggregator
 from .base import BaseNN
+import utils as u
 
 
 class StateKey(BaseNN):
@@ -26,9 +27,12 @@ class StateKey(BaseNN):
 
 
 class Inferrer(BaseNN):
-    def __init__(self, dim_out: int, config: NetConfig):
+    def __init__(self, shape_out: Tuple[int, ...], config: NetConfig,
+                 categorical=False):
         super().__init__(config)
-        self._dim_out = dim_out
+        self._shape_out = shape_out
+        self._size_out = u.get_size(shape_out)
+        self._categorical = categorical
 
         dims = self.dims
         if config.ablations.recur:
@@ -46,7 +50,7 @@ class Inferrer(BaseNN):
             nn.LeakyReLU(),
             nn.Linear(dims.h_dec, dims.h_dec, **config.torchargs),
             nn.PReLU(dims.h_dec, **config.torchargs),
-            nn.Linear(dims.h_dec, dim_out, **config.torchargs)
+            nn.Linear(dims.h_dec, self._size_out, **config.torchargs)
         )
 
         self.attn: torch.Tensor
@@ -107,7 +111,7 @@ class Inferrer(BaseNN):
         vs = torch.sum(vs * attn.view(num_state, batch_size, 1),
                        dim=0)  # batch * dim_v
         va = self.linear_va(emb_a)   # batch * dim_v
-        out = vs + va  # batch * dim_v
+        out: torch.Tensor = vs + va  # batch * dim_v
 
         # out: batch * dim_v
         return out
@@ -138,5 +142,26 @@ class Inferrer(BaseNN):
         else:
             x = self.__attn_infer(actions, kstates, states)
 
-        out: torch.Tensor = self.decoder(x)
-        return out
+        out: torch.Tensor = self.decoder(x)  # batchsize * dim_out
+        if self._categorical:
+            out = torch.softmax(out, dim=1)
+        return out.view(out.shape[0], *self._shape_out)
+    
+    def error(self, out: torch.Tensor, target: np.ndarray):
+        if self._categorical:
+            prob = torch.softmax(out, dim=1)
+            indices = u.transform.onehot_indices(target)
+            e = -(torch.log(prob[indices] + 1e-20)) + 1e-20
+            return torch.mean(e)
+        else:
+            target_ = torch.from_numpy(target).to(**self.torchargs)
+            return torch.mean(torch.square(target_ - out))
+    
+    def predict(self, out: torch.Tensor) -> np.ndarray:
+        out = out.detach()
+        if self._categorical:
+            pred = u.reduction.batch_argmax(out)
+            pred = pred.cpu().numpy()
+        else:
+            pred = out.cpu().numpy()
+        return pred

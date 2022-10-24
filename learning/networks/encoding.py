@@ -5,6 +5,7 @@ import numpy as np
 
 from .config import NetConfig
 from .base import BaseNN
+import utils as u
 
 
 class VariableEncoder(BaseNN):
@@ -28,14 +29,25 @@ class VariableEncoder(BaseNN):
         for key, linear in self.sub_modules.items():
             self.add_module(f"{key}_encoder", linear)
 
-    def forward(self, datadic: Dict[str, np.ndarray]):
+    def forward_all(self, datadic: Dict[str, np.ndarray]):
         out: Dict[str, torch.Tensor] = {}
-        for var, linear in self.sub_modules.items():
-            data = datadic[var]
-            x = torch.from_numpy(data.reshape(
-                len(data), -1)).to(**self.torchargs)
-            out[var] = linear(x)
+        for var in self.sub_modules.keys():
+            out[var] = self.forward(var, datadic[var])
         return out
+
+    def forward(self, var: str, data: np.ndarray) -> torch.Tensor:
+        x = self.__get_input_tensor(var, data)
+        sub_module = self.sub_modules[var]
+        return sub_module(x)
+    
+    def __get_input_tensor(self, var: str, array: np.ndarray):
+        batchsize = array.shape[0]
+        varinfo = self.config.var(var)
+        if varinfo.categorical:
+            x = u.transform.onehot(array, varinfo.shape, **self.torchargs)
+        else:
+            x = torch.from_numpy(array).to(**self.torchargs)
+        return x.view(batchsize, varinfo.size)
 
 
 class Aggregator(BaseNN):

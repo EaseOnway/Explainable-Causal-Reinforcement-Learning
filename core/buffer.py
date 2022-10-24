@@ -29,15 +29,17 @@ class Buffer():
         return self.__data[name].dtype
 
     def __declear(self, name: str, varinfo: VarInfo):
-        shape, dtype, default = varinfo.shape, varinfo.dtype, varinfo.default
         if name in self.__data:
             raise ValueError(f"data of '{name}' is already decleared")
-        if isinstance(shape, int):
-            shape = (shape,)
-        if default is not None:
-            self.__defaults[name] = default
-        data_shape = (2*self.__max_size,) + shape
-        self.__data[name] = np.empty(shape=data_shape, dtype=dtype)
+        
+        if varinfo.categorical:
+            shape = (2*self.__max_size, len(varinfo.shape))
+        else:
+            shape = (2*self.__max_size,) + varinfo.shape
+
+        self.__data[name] = np.empty(shape, varinfo.dtype)
+        if varinfo.default is not None:
+            self.__defaults[name] = varinfo.default
 
     def __imap(self, i: Union[int, np.ndarray]) -> Union[int, np.ndarray]:
         if isinstance(i, int):

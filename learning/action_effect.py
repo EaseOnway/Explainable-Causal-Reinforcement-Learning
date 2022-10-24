@@ -5,7 +5,8 @@ import torch
 
 from .networks.inferrer import Inferrer
 from .networks import CausalNet
-from utils.visualize import plot_digraph
+import utils as u
+
 import core.scm as scm
 
 
@@ -25,7 +26,7 @@ class ActionEffect:
         # 2. the action-effect embedding of each structural function
         # 3. the attention scores of each structrual function
         with torch.no_grad():
-            actions = network.action_encoder.forward(action_datadic)
+            actions = network.action_encoder.forward_all(action_datadic)
             a_embs: Dict[str, torch.Tensor] = {}
             causations: Dict[str, Tuple[str, ...]] = {}
             weights: Dict[str, torch.Tensor] = {}
@@ -67,20 +68,16 @@ class ActionEffect:
             caus = self.__causations[var]
             states = []
             for pa, s in zip(caus, causal_states):
-                s = torch.tensor(s, **self._cfg.torchargs).reshape(1, -1)
-                submodule = self.network.state_encoder.sub_modules[pa]
-                states.append(submodule(s))
-            if len(states) > 0:
-                states = torch.stack(states)
-            else:
-                states = torch.zeros((0, 1, self._cfg.dims.s),
-                                     **self._cfg.torchargs)
+                v = self._cfg.var(pa)
+                shape = (len(v.shape),) if v.categorical else v.shape
+                s = np.array(s, v.dtype).reshape(1, *shape)
+                states.append(self.network.state_encoder.forward(pa, s))
+            states = u.safe.stack(states, (1, self._cfg.dims.s), **self._cfg.torchargs)
             inferrer = self.network.inferrers[var]
             out = inferrer.attn_infer(weight, emb_a, states)
             out = inferrer.decoder(out)
-        
-        out = out.cpu().numpy()
-        out = np.reshape(out, self._cfg.var(var).shape)
+            out = inferrer.predict(out)
+            out = np.squeeze(out, axis=0)
         return out
     
     def __get_causal_eq(self, var: str):
@@ -110,5 +107,5 @@ class ActionEffect:
                 print("\tno causations")
 
     def plot(self, format='png'):
-        return plot_digraph(self._cfg.outkeys, self.__causations,  # type: ignore
+        return u.plot_digraph(self._cfg.outkeys, self.__causations,  # type: ignore
                             format=format)

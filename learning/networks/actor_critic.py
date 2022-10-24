@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 from .inferrer import Inferrer
 from .config import *
-from .utils import safe_concat
+import utils as u
 from .base import BaseNN
 
 
@@ -27,7 +27,7 @@ class Critic(BaseNN):
         _, batch_size, _ = states.shape
         outs = [self.inferrers[o].forward(actions, kstates, states)
                 for o in self._outcome_keys]
-        outs = safe_concat(outs, (batch_size, 1), dim=1, **self.torchargs)
+        outs = u.safe.concat(outs, (batch_size, 1), dim=1, **self.torchargs)
         return outs  # batchsize * n_outcomes
 
     def q(self, qs: torch.Tensor, detach=True):
@@ -38,3 +38,8 @@ class Critic(BaseNN):
 class Actor(BaseNN):
     def __init__(self, config: NetConfig):
         super().__init__(config)
+
+        self._total_state_size = sum(
+            config.var(k).size for k in config.inkeys_a)
+        
+        self._total
