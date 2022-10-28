@@ -1,29 +1,22 @@
+from typing import Dict
+import numpy as np
 import torch
 import torch.nn as nn
-from .config import *
+from learning.config import Config, Configured
+from core import Batch
+
+import utils.tensorfuncs as T
 
 
-class BaseNN(nn.Module):
-    Config = NetConfig
-    Dims = NetDims
-    Ablations = NetAblations
+class BaseNN(nn.Module, Configured):
 
-    def __init__(self, config: NetConfig):
-        super().__init__()
-        self.__config = config
-    
-    @property
-    def config(self):
-        return self.__config
-    
-    @property
-    def dims(self):
-        return self.__config.dims
-    
-    @property
-    def torchargs(self):
-        return self.__config.torchargs
+    def __init__(self, config: Config):
+        nn.Module.__init__(self)
+        Configured.__init__(self, config)
 
-    @property
-    def ablations(self):
-        return self.__config.ablations
+    def init_parameters(self):
+        for p in self.parameters():
+            if p.ndim < 2:
+                nn.init.normal_(p)
+            else:
+                nn.init.xavier_normal_(p)

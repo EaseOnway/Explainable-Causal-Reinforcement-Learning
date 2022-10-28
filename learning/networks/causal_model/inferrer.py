@@ -1,56 +1,55 @@
-from typing import Tuple, Optional
+from typing import Sequence, Tuple, Optional
 import torch
 import torch.nn as nn
 import numpy as np
+from core.data import Batch
 
-from .config import NetConfig
+from learning.config import Config
 from .encoding import Aggregator
-from .base import BaseNN
-import utils as u
+from ..base import BaseNN
+import utils.tensorfuncs as T
+import utils.shaping as shaping
 
 
 class StateKey(BaseNN):
-    def __init__(self, config: NetConfig):
+    def __init__(self, config: Config):
         super().__init__(config)
-
         self.K = nn.parameter.Parameter(
-            torch.zeros((len(config.inkeys_s), config.dims.k),
-                        **config.torchargs)
-        )
+            torch.zeros(self.env.num_s, self.dims.inferrer_key),
+                        **self.torchargs)
 
-        self.__indexmap = {s: i for i, s in enumerate(config.inkeys_s)}
-
-    def forward(self, state_names: Tuple[str]):
-        i = tuple(self.__indexmap[name] for name in state_names)
+    def forward(self, state_names: Sequence[str]):
+        i = tuple(self.env.idx_s(name) for name in state_names)
 
         return self.K[i, :]
 
 
 class Inferrer(BaseNN):
-    def __init__(self, shape_out: Tuple[int, ...], config: NetConfig,
-                 categorical=False):
+    def __init__(self, shape_out: Tuple[int, ...], config: Config):
         super().__init__(config)
         self._shape_out = shape_out
-        self._size_out = u.get_size(shape_out)
-        self._categorical = categorical
+        self._size_out = shaping.get_size(shape_out)
 
-        dims = self.dims
+        da, ds = self.dims.action_encoding, self.dims.state_encoding
+        dv, dk = self.dims.inferrer_value, self.dims.inferrer_key
+        dh_agg = self.dims.action_aggregator_hidden
+        dh_dec = self.dims.inferrer_decoder_hidden
+
         if config.ablations.recur:
-            d = max(dims.a, dims.s)
-            self.aggregator = Aggregator(d, dims.v, config)
+            d = max(da, ds)
+            self.aggregator = Aggregator(d, dv, dh_agg, config)
         else:
-            self.aggregator = Aggregator(dims.a, dims.a_emb, config)
-            self.linear_q = nn.Linear(dims.a_emb, dims.k, **config.torchargs)
-            self.linear_vs = nn.Linear(dims.s, dims.v, **config.torchargs)
-            self.linear_va = nn.Linear(dims.a_emb, dims.v, **config.torchargs)
+            self.aggregator = Aggregator(da, dk, dh_agg, config)
+            self.linear_vs = nn.Linear(ds, dv, **self.torchargs)
+            self.linear_va = nn.Linear(dk, dv, **self.torchargs)
 
         self.decoder = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Linear(dims.v, dims.h_dec, **config.torchargs),
+            nn.Linear(dv, dh_dec, **self.torchargs),
             nn.LeakyReLU(),
-            nn.Linear(dims.h_dec, dims.h_dec, **config.torchargs),
-            nn.PReLU(dims.h_dec, **config.torchargs),
-            nn.Linear(dims.h_dec, self._size_out, **config.torchargs)
+            nn.Linear(dh_dec, dh_dec, **self.torchargs),
+            nn.PReLU(dh_dec, **self.torchargs),
+            nn.Linear(dh_dec, self._size_out, **self.torchargs)
         )
 
         self.attn: torch.Tensor
@@ -63,8 +62,8 @@ class Inferrer(BaseNN):
                     # parent_states * batch * dim_s
                     states: torch.Tensor,
                     ):
-        da, ds = self.dims.a, self.dims.s
-
+        
+        da, ds = self.dims.action_encoding, self.dims.state_encoding
         batchsize = actions.shape[1]
         assert states.shape[1] == batchsize
 
@@ -92,9 +91,9 @@ class Inferrer(BaseNN):
     def get_attn_scores(self, emb_a: torch.Tensor, kstates: torch.Tensor):
         num_state, _ = kstates.shape
         kstates = kstates.unsqueeze(dim=1)  # num_state * 1 *dim_k
-        q = self.linear_q(emb_a)  # batch * dim_k
+        q = emb_a  # batch * dim_k
         scores: torch.Tensor = torch.sum(
-            kstates * q, dim=2) / np.sqrt(self.dims.k)  # num_state * batch
+            kstates * q, dim=2) / np.sqrt(self.dims.inferrer_key)  # num_state * batch
         attn = torch.softmax(scores, dim=0)  # num_state * batch
         return attn
 
@@ -135,6 +134,18 @@ class Inferrer(BaseNN):
         self.attn = attn
         return out
 
+    @staticmethod
+    def input_from(action_keys: Sequence[str], state_keys: Sequence[str],
+                   data: Batch[torch.Tensor], key_model: StateKey):
+        actions = T.safe_stack([data[k] for k in action_keys],
+                               (data.n, key_model.dims.action_encoding),
+                                **key_model.torchargs)
+        states = T.safe_stack([data[k] for k in sorted(state_keys)],
+                              (data.n, key_model.dims.state_encoding),
+                               **key_model.torchargs)
+        kstates = key_model.forward(state_keys)
+        return actions, kstates, states
+
     def forward(self, actions: torch.Tensor, kstates: torch.Tensor,
                 states: torch.Tensor):
         if self.ablations.recur:
@@ -143,25 +154,10 @@ class Inferrer(BaseNN):
             x = self.__attn_infer(actions, kstates, states)
 
         out: torch.Tensor = self.decoder(x)  # batchsize * dim_out
-        if self._categorical:
-            out = torch.softmax(out, dim=1)
         return out.view(out.shape[0], *self._shape_out)
     
-    def error(self, out: torch.Tensor, target: np.ndarray):
-        if self._categorical:
-            prob = torch.softmax(out, dim=1)
-            indices = u.transform.onehot_indices(target)
-            e = -(torch.log(prob[indices] + 1e-20)) + 1e-20
-            return torch.mean(e)
-        else:
-            target_ = torch.from_numpy(target).to(**self.torchargs)
-            return torch.mean(torch.square(target_ - out))
+    def error(self, out: torch.Tensor, target: torch.Tensor):
+        return torch.mean(torch.square(target - out))
     
     def predict(self, out: torch.Tensor) -> np.ndarray:
-        out = out.detach()
-        if self._categorical:
-            pred = u.reduction.batch_argmax(out)
-            pred = pred.cpu().numpy()
-        else:
-            pred = out.cpu().numpy()
-        return pred
+        return T.t2a(out)

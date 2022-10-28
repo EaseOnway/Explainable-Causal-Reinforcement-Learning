@@ -1,16 +1,18 @@
 import torch
-from core import Buffer, CausalMdp, scm, TaskInfo
+from core import Buffer, CausalMdp, scm, EnvInfo
 import learning.causal_discovery as causal_discovery
 
 import learning
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import learning.config as cfg
 
 
 np.set_printoptions(precision=4)
 
-job_salaries = [5, 10, 20, 30]
+job_salaries = np.array([5, 10, 20, 30])
+
 
 class MyMdp(CausalMdp):
 
@@ -28,7 +30,7 @@ class MyMdp(CausalMdp):
         money_o = scm.EndoVar((money, payment),
                               lambda m, p: m + p, name='money(new)')
         happy_o = scm.EndoVar((play,), lambda p: 5*p, name='happy(new)')
-        payment_o = scm.EndoVar((work, job), lambda w, j: w * job_salaries[j],
+        payment_o = scm.EndoVar((work, job), lambda w, j: w * np.sum(job_salaries * j),
                                 name='payment(new)')
         job_o = scm.EndoVar((job,), lambda a: a, name='job(new)')
 
@@ -43,29 +45,60 @@ class MyMdp(CausalMdp):
         )
 
     def sample(self):
-        money = np.random.normal(scale=20)
+        money = np.random.uniform(0., 1.)
         happy = np.random.normal(scale=5)
         payment = np.random.uniform(high=5)
+        
         job = np.random.randint(len(job_salaries))
+        job = np.eye(len(job_salaries))[job]
+        
         work = np.random.rand()
         play = np.random.rand()
 
         return (money, happy, payment, job), (work, play)
 
 
-mdp = MyMdp()
+
+
+
+
+envinfo= EnvInfo()
+envinfo.state('money')
+envinfo.state('happy')
+envinfo.state('payment')
+envinfo.state('job', dtype=np.uint8, shape=len(job_salaries))
+envinfo.outcome('reward')
+envinfo.action('work', (), False, float)
+envinfo.action('play', (), False, float)
+
+
+class MyMdp(CausalMdp):
+
+    def __init__(self):
+        super().__init__(envinfo)
+        
+        self.define('money', ['money', 'payment'], lambda m, p: m + p)
+        self.define('happy', ['play'], lambda p: 5*p)
+        self.define('payment', ['work', 'job'])
+
+        money_o = scm.EndoVar((money, payment),
+                              lambda m, p: m + p, name='money(new)')
+        happy_o = scm.EndoVar((play,), lambda p: 5*p, name='happy(new)')
+        payment_o = scm.EndoVar((work, job), lambda w, j: w * np.sum(job_salaries * j),
+                                name='payment(new)')
+        job_o = scm.EndoVar((job,), lambda a: a, name='job(new)')
+
+        r = scm.EndoVar((money_o, happy_o), lambda m,
+                        h: 0.5 * m + 0.5 * h, name='reward')
+
+        self.config(
+            state_vars=((money, money_o), (happy, happy_o),
+                        (payment, payment_o), (job, job_o)),
+            action_vars=(work, play),
+            reward_vars=(r,)
+        )
+
 mdp.plot().view('./causal_graph.gv')
-
-
-task = TaskInfo()
-task.state('money', 'money(new)')
-task.state('happy', 'happy(new)')
-task.state('payment', 'payment(new)')
-task.state('job', 'job(new)', categorical=True, dtype=np.uint8, 
-           shape=len(job_salaries))
-task.outcome('reward')
-task.action('work', (), False, float)
-task.action('play', (), False, float)
 
 '''
 parent_dic = {
@@ -74,28 +107,26 @@ parent_dic = {
 }
 '''
 
-def sample_func():
-    s, a = mdp.sample()
-    mdp.model(s, a)
-    return mdp.valuedic()
 
+config = cfg.Config(task,
+    batchsize=128, niter_epoch=100, convergence_window=10,
+    niter_planning_epoch = 50, check_convergence=True,
+    batchsize_eval=256, num_sampling=500,
+    conf_decay=0.05, causal_prior=0.4,
+    causal_pvalue_thres=0.05, buffersize=5000,
+    device=torch.device('cuda'), gamma=0.0,
+)
 
-trainer = learning.Train(learning.Train.Config(
-    learning.CausalNet.Config(task, 'cuda'),
-    batchsize=128, niter_epoch=100, abort_window=10,
-    batchsize_eval=256, num_sampling=500, conf_decay=0.1,
-    causal_prior=0.4, causal_pvalue_thres=0.05, buffersize=5000,
-), sampler = sample_func)
+trainer = learning.Train(config)
 
 
 trainer.collect_samples(1000)
-info = trainer.run(10, 'verbose')
-info.show()
+trainer.run(50, 'verbose')
 
 
 state, action = mdp.sample()
 ae = learning.ActionEffect(
-    trainer.network,
+    trainer.causnet,
     {"work": np.array(action[0]),
      "play": np.array(action[1])},
     attn_thres=0.2,
@@ -112,3 +143,5 @@ mdp.model(state, action)
 print("work = %f, play = %f" % action)
 for var in m.endo_variables:
     print(f"{var.name}: predicted[{var.value}], truth[{mdp[var.name].value}]")
+
+

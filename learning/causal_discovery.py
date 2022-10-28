@@ -4,19 +4,19 @@ import numpy as np
 import torch
 
 import utils
-from core.buffer import Buffer
-from core.taskinfo import TaskInfo
+from core.data import Buffer
+from core.env import Env
 
 
-def discover(buffer: Buffer, taskinfo: TaskInfo, thres=0.05, log=True
+def discover(buffer: Buffer, env: Env, thres=0.05, log=True
              ) -> Dict[str, List[str]]:
     pa_dic: Dict[str, List[str]] = {
-        key: [] for key in taskinfo.out_state_keys | taskinfo.outcomes_keys}
+        key: [] for key in env.names_outputs}
 
-    data = buffer.read()
+    data = buffer.read_all()
 
-    for i in taskinfo.in_state_keys | taskinfo.action_keys:
-        for j in taskinfo.out_state_keys | taskinfo.outcomes_keys:
+    for i in env.names_inputs:
+        for j in env.names_outputs:
             p: float = utils.fcit_test(
                 data[i].reshape(len(buffer), -1),
                 data[j].reshape(len(buffer), -1))  # type: ignore
@@ -41,7 +41,7 @@ def update(old: Dict[str, List[str]], buffer: Buffer,
     else:
         new = {k: list(v) for k, v in old.items()}
     
-    data = buffer.read()
+    data = buffer.read_all()
     for i, j in edges:
         try:
             new[j].remove(i)
