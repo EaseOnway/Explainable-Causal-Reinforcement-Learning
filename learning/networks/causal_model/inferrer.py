@@ -15,8 +15,8 @@ class StateKey(BaseNN):
     def __init__(self, config: Config):
         super().__init__(config)
         self.K = nn.parameter.Parameter(
-            torch.zeros(self.env.num_s, self.dims.inferrer_key),
-                        **self.torchargs)
+            torch.zeros(self.env.num_s, self.dims.inferrer_key,
+                        **self.torchargs))
 
     def forward(self, state_names: Sequence[str]):
         i = tuple(self.env.idx_s(name) for name in state_names)

@@ -26,9 +26,8 @@ class EnvInfo:
             raise ValueError(f"'{name}' already exists")
         self.varinfos[name] = VarInfo(shape, dtype, default)
 
-    def action(self, name: str, shape: ShapeLike,
-               onehot=True, dtype: type = np.uint8, 
-               default: Optional[Any] = None):
+    def action(self, name: str, shape: ShapeLike = (),
+               dtype: type = float, default: Optional[Any] = None):
         self.var(name, shape, dtype, default)
         self.action_names.add(name)
 
@@ -60,17 +59,17 @@ class Env(abc.ABC):
         self.__names_a = tuple(sorted(info.action_names))
         names_s = tuple(sorted(info.state_names))
         self.__names_s = tuple(name[0] for name in names_s)
-        self.__names_s_next = tuple(name[1] for name in names_s)
-        self.__names_inputs = self.__names_s + self.__names_a
-        self.__names_outputs = self.__names_o + self.__names_s_next
+        self.__names_next_s = tuple(name[1] for name in names_s)
         self.__names_o = tuple(sorted(info.outcome_names))
+        self.__names_inputs = self.__names_s + self.__names_a
+        self.__names_outputs = self.__names_o + self.__names_next_s
         self.__num_a = len(self.__names_a)
         self.__num_s = len(self.__names_s)
         self.__num_o = len(self.__names_o)
         
         self.__action_id_map = {k: i for i, k in enumerate(self.__names_a)}
-        self.__state_id_map = {k[0]: i for i, k in enumerate(self.__names_s)}
-        self.__state_id_map.update({k[1]: i for i, k in enumerate(self.__names_s)})
+        self.__state_id_map = {k: i for i, k in enumerate(self.__names_s)}
+        self.__state_id_map.update({k: i for i, k in enumerate(self.__names_next_s)})
         self.__outcome_id_map = {k: i for i, k in enumerate(self.__names_o)}
         self.__varinfos: Dict[str, VarInfo] = info.varinfos
         
@@ -80,11 +79,11 @@ class Env(abc.ABC):
     
         self.reset()
     
-    def reset(self):
+    def reset(self, *args, **kargs):
         ''' initialiize the current state
         '''
 
-        self.__current_state = self.init()
+        self.__current_state = self._2karrays(self.init(*args, **kargs))
     
 
     def step(self, action: _KArrays) -> Tuple[_KArrays, float, bool, Any]:
@@ -102,7 +101,7 @@ class Env(abc.ABC):
         for name in self.names_outputs:
             if name not in out:
                 raise ValueError(f"{name} is missing")
-        transition.update(out)
+        transition.update(self._2karrays(out))
         done = self.done(transition, info)
         if not done:
             self.__current_state = {name: transition[Env.name_next_step(name)]
@@ -114,15 +113,15 @@ class Env(abc.ABC):
         return transition, reward, done, info
 
     @abc.abstractmethod
-    def init(self) -> _KArrays:
+    def init(self, *args, **kargs) -> Dict[str, Any]:
         '''
-        initialiize the current state dict
+        initialiize the state dict
         '''
         raise NotImplementedError
 
     @abc.abstractmethod    
     def transit(self, states_and_actions: _KArrays
-                ) -> Tuple[_KArrays, Any]:
+                ) -> Tuple[Dict[str, Any], Any]:
         '''
         return:
         - next states and outcomes (dict)
@@ -131,12 +130,12 @@ class Env(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def done(self, trainsition: _KArrays, info: Any) -> bool:
+    def done(self, transition: _KArrays, info: Any) -> bool:
         raise NotImplementedError
 
     @final
     def set_task(self, weights: Dict[str, float]):
-        self.__weights_o = np.zeros(self.num_o, dtype=float)
+        self.__weights_o[:] = 0.
         for name, w in weights.items():
             self.__weights_o[self.idx_o(name)] = w
 
@@ -158,7 +157,7 @@ class Env(abc.ABC):
     @property
     @final
     def names_next_s(self):
-        return self.__names_s_next
+        return self.__names_next_s
     
     @property
     @final
@@ -193,7 +192,7 @@ class Env(abc.ABC):
     @final
     def name_s(self, i: int, next=False):
         if next:
-            return self.__names_s_next[i]
+            return self.__names_next_s[i]
         else:
             return self.__names_s[i]
     
@@ -246,3 +245,16 @@ class Env(abc.ABC):
     def reward(self, outcomes: _KArrays):
         return sum(self.weight_o(i) * outcomes[self.name_o(i)]
                    for i in range(self.num_o))
+
+    @final
+    def _2array(self, name: str, value: Any):
+        v = self.var(name)
+        if not isinstance(value, np.ndarray):
+            value = np.array(value, dtype=v.dtype)
+        if value.shape != v.shape:
+            value.reshape(v.shape)
+        return value
+    
+    @final
+    def _2karrays(self, kvalues: Dict[str, Any]) -> _KArrays:
+        return {k: self._2array(k, v) for k, v in kvalues.items()}

@@ -29,7 +29,9 @@ class Train(Configured):
         self.causnet = CausalNet(config)
         self.buffer = Buffer(self.env.info.varinfos, self.args.buffersize)
         self.opt = config.train_args.get_optimizer(self.causnet)
+        
         self.__causal_graph = self.init_causal_graph()
+        self.causnet.load_graph(self.__causal_graph)
 
         self.planner = DDPG(config, self.causnet)
         
@@ -45,7 +47,6 @@ class Train(Configured):
                 self.env.step({k: v.squeeze(0) for k, v in s.data.items()})
             return tran, r
         
-
     def collect_samples(self, n: int):
         rewards = pd.Series(dtype=float)
         outcomes = pd.DataFrame(columns=self.env.names_o) # type: ignore
@@ -213,13 +214,19 @@ class Train(Configured):
             self.outcome_epoch.plot()
             plt.show()
     
-    def warmup(self, n_samples, n_iter):
+    def warmup(self, n_samples, n_iter, printlog=True):
         self.buffer.clear()
-
+        outcomes, reward = self.collect_samples(n_samples)
+        self.__causal_graph = discover(self.buffer, self.env,
+                                       self.args.causal_pvalue_thres,
+                                       printlog)
+        self.causnet.load_graph(self.__causal_graph)
+        info = self.fit(n_iter)
+        return outcomes, reward
 
     def run(self, n_epoch: int, 
             showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):
-        logdir = self.__logdir + "run-" + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime())
+        logdir = self.__logdir + "run-" + time.strftime("%Y%m%d-%H-%M-%S", time.localtime())
         if not os.path.exists(logdir):
             os.makedirs(logdir)
         writer = tensorboardX.SummaryWriter(logdir)
@@ -233,43 +240,51 @@ class Train(Configured):
         show_log_texts = (showinfo == 'verbose' or showinfo == 'plot')
         show_plot = (showinfo == 'plot')
 
+        n_sample = self.args.n_sample_warmup
+        outcomes, reward = self.warmup(n_sample, self.args.n_iter_epoch)
         
         for i in range(n_epoch):
+            # evaluating
             print(f"epoch {i}: ", end='')
-
-            # collect samples
-            outcomes, reward = self.collect_samples(self.args.num_sampling)
-            writer.add_scalar('reward', reward)
-            writer.add_scalars('outcome', outcomes.to_dict())  # type: ignore
-
-            # planning with samples
-            planinfo = self.planning(self.args.niter_planning_epoch)
-            writer.add_scalar('actor loss', planinfo.actor_loss_mean)
-            writer.add_scalar('critic loss', planinfo.critic_loss_mean)
-
-            # load causal graph
-            self.causnet.load_graph(self.__causal_graph)
-
-            # update causal equations
-            traininfo = self.fit(self.args.niter_epoch, eval=False)
             evalinfo = self.__eval(conf)
-            writer.add_scalar('fitting loss', evalinfo.loss)
-            writer.add_scalars('fitting error', evalinfo.err.to_dict())  # type: ignore
-            
+            writer.add_scalar('fitting loss', evalinfo.loss, n_sample)
+            writer.add_scalars('fitting error', evalinfo.err.to_dict(), n_sample)  # type: ignore
+            writer.add_scalar('reward', reward, n_sample)
+            writer.add_scalars('outcome', outcomes.to_dict(), n_sample)  # type: ignore
+
+            # show running statistics
             if show_loss:
                 print('')
-                print(f"mean reward:\t{outcomes.at['__reward__']}")
+                print(f"mean reward:\t{reward}")
                 print(f"loss:\t{evalinfo.loss}")
             if show_log_texts:
                 for k, e in evalinfo.err.items():
                     print(f"\terror of '{k}':\t{e}")
-            if show_plot:
-                traininfo.show()
-                planinfo.show()
-            
             if show_log_texts:
                 print("---------------------confidence-----------------------")
                 print(conf)
+
+            # update policy
+            planinfo = self.planning(self.args.n_iter_planning)
+            writer.add_scalar('actor loss', planinfo.actor_loss_mean, n_sample)
+            writer.add_scalar('critic loss', planinfo.critic_loss_mean, n_sample)
+
+            # collect new samples
+            outcomes, reward = self.collect_samples(self.args.n_sample_epoch)
+            n_sample += self.args.n_sample_epoch
+            
+            # update causal graph
             self.update_causal_graph(conf, show_log_texts)
+            self.causnet.load_graph(self.__causal_graph)
+
+            # update causal equation
+            fitinfo = self.fit(self.args.n_iter_epoch, eval=False)
+            
+            # show running statistics
+            if show_plot:
+                fitinfo.show()
+                planinfo.show()
 
             print("Done.")
+        
+        writer.close()

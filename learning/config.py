@@ -63,8 +63,8 @@ class TrainArgs(_BaseConfig):
     def __init__(self, **kargs):
         self.buffersize = 10000
         self.batchsize = 128
-        self.niter_epoch = 10
-        self.niter_planning_epoch = 10
+        self.n_iter_epoch = 10
+        self.n_iter_planning = 10
         self.check_convergence = False
         self.convergence_window = 10
         self.optalg: Literal["Adam", "SGD"] = "Adam"
@@ -75,7 +75,9 @@ class TrainArgs(_BaseConfig):
         self.adaptive_thres = True
         self.batchsize_eval = 128
         self.conf_decay = 0.1
-        self.num_sampling = 500
+        self.n_sample_epoch = 500
+        self.n_sample_warmup = 2000
+        self.n_iter_warmup = 50
 
         self._override(**kargs)
 
