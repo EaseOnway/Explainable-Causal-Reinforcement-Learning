@@ -54,19 +54,20 @@ mdp.scm.plot().view('./causal_graph.gv')
 
 
 config = cfg.Config(mdp,
-    batchsize=128, n_iter_epoch=50, convergence_window=10,
-    n_iter_planning = 20, check_convergence=True,
-    batchsize_eval=256, n_sample_epoch=100,
+    batchsize=128, n_iter_epoch=100, convergence_window=10,
+    n_iter_planning = 5, check_convergence=False, n_iter_warmup=200,
+    batchsize_eval=256, n_sample_epoch=500, explore_sd=0.2,
     n_sample_warmup=1000, conf_decay=0.05, causal_prior=0.4,
     causal_pvalue_thres=0.05, buffersize=5000,
-    device=torch.device('cuda'), gamma=0.98,
+    device=torch.device('cuda'), gamma=0.9,
+    graph_fixed=True,
 )
 
 trainer = learning.Train("test", config)
+trainer.causal_graph = mdp.scm.parentdic()
 
 
-trainer.collect_samples(1000)
-trainer.run(50, 'verbose')
+trainer.run(500, 'verbose')
 
 
 state = mdp.init()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import numpy as np
 import torch
@@ -12,6 +12,9 @@ from .encoding import VariableEncoder
 from .inferrer import Inferrer, StateKey
 from learning.config import Config
 import utils.tensorfuncs as T
+
+
+_ParentDic = Dict[str, Tuple[str, ...]]
 
 
 class CausalNet(BaseNN):
@@ -26,9 +29,9 @@ class CausalNet(BaseNN):
 
         dims = config.dims
 
-        self.parent_dic: Dict[str, Tuple[str, ...]] = {}
-        self.parent_dic_s: Dict[str, Tuple[str, ...]] = {}
-        self.parent_dic_a: Dict[str, Tuple[str, ...]] = {}
+        self.parent_dic: _ParentDic = {}
+        self.parent_dic_s: _ParentDic = {}
+        self.parent_dic_a: _ParentDic = {}
 
         self.encoder = VariableEncoder(config)
         self.inferrers: Dict[str, Inferrer] = {}
@@ -41,7 +44,7 @@ class CausalNet(BaseNN):
         # init parameters
         self.init_parameters()
 
-    def load_graph(self, parent_dic: Dict[str, List[str]]):
+    def load_graph(self, parent_dic: Dict[str, Set[str]]):
         self.parent_dic.clear()
         self.parent_dic_s.clear()
         self.parent_dic_a.clear()
@@ -52,11 +55,11 @@ class CausalNet(BaseNN):
             except KeyError:
                 parents = []
 
-            self.parent_dic[name] = tuple(parents)
-            self.parent_dic_s[name] = tuple(
-                pa for pa in parents if pa in self.env.names_s)
-            self.parent_dic_a[name] = tuple(
-                pa for pa in parents if pa in self.env.names_a)
+            self.parent_dic[name] = tuple(sorted(parents))
+            self.parent_dic_s[name] = tuple(sorted(
+                pa for pa in parents if pa in self.env.names_s))
+            self.parent_dic_a[name] = tuple(sorted(
+                pa for pa in parents if pa in self.env.names_a))
 
     def forward(self, datadic: Batch[torch.Tensor]):
         n = datadic.n  # batchsize

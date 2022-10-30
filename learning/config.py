@@ -37,6 +37,8 @@ class Ablations(_BaseConfig):
     def __init__(self, **kargs):
         self.no_attn = False
         self.recur = False
+        self.graph_fixed = False  # graph never updates
+        self.graph_offline = False  # graph only updates in warmup
 
         self._override(**kargs)
 

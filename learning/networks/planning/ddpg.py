@@ -90,7 +90,6 @@ class Actor(BaseNN):
             a = d(e).view(states.n, *self.v(k).shape)
             if explore_sd is not None:
                 a += torch.randn_like(a) * explore_sd
-            a = torch.sigmoid(a)
             out[k] = a
         
         return out

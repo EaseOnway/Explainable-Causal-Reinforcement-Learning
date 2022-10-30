@@ -11,7 +11,7 @@ import utils.tensorfuncs as T
 import tensorboardX
 
 from core import Buffer, Batch
-from .causal_discovery import discover, update
+from .causal_discovery import discover, update, ParentDict
 from .networks import CausalNet
 from .networks.planning.ddpg import DDPG
 from .config import Config, Configured
@@ -30,9 +30,7 @@ class Train(Configured):
         self.buffer = Buffer(self.env.info.varinfos, self.args.buffersize)
         self.opt = config.train_args.get_optimizer(self.causnet)
         
-        self.__causal_graph = self.init_causal_graph()
-        self.causnet.load_graph(self.__causal_graph)
-
+        self.causal_graph = self.init_causal_graph()
         self.planner = DDPG(config, self.causnet)
         
         self.__logdir = './logs/' + name + '/'
@@ -59,15 +57,21 @@ class Train(Configured):
         return outcomes.mean(axis=0), rewards.mean()
 
     def init_causal_graph(self):
-        parent_dic = {j: [i for i in self.env.names_inputs
-                          if u.basics.prob(self.args.causal_prior)]
+        parent_dic = {j: {i for i in self.env.names_inputs
+                          if u.basics.prob(self.args.causal_prior)}
                       for j in self.env.names_outputs}
         return parent_dic
 
-    @final
     @property
+    @final
     def causal_graph(self):
         return self.__causal_graph
+
+    @causal_graph.setter
+    @final
+    def causal_graph(self, graph: ParentDict):
+        self.__causal_graph = graph
+        self.causnet.load_graph(self.__causal_graph)
 
     @final
     def plot_causal_graph(self, format='png'):
@@ -165,6 +169,10 @@ class Train(Configured):
         return Train.PlanInfo(losses_a, losses_c)
 
     def update_causal_graph(self, conf: pd.DataFrame, showinfo=True):
+        if showinfo:
+            print("---------------------confidence-----------------------")
+            print(conf)
+
         edges_to_check = []
         for j, confj in conf.items():
             for i, confij in confj.items():
@@ -177,7 +185,9 @@ class Train(Configured):
             thres = prior - (prior - thres) * len(self.buffer) / self.buffer.max_size
         
         update(self.__causal_graph, self.buffer, *edges_to_check,
-               thres=thres, showinfo=showinfo)
+               thres=thres, showinfo=showinfo, inplace=True)
+        self.causnet.load_graph(self.__causal_graph)
+
         for i, j in edges_to_check:
             conf.loc[i, j] = 1
 
@@ -217,10 +227,10 @@ class Train(Configured):
     def warmup(self, n_samples, n_iter, printlog=True):
         self.buffer.clear()
         outcomes, reward = self.collect_samples(n_samples)
-        self.__causal_graph = discover(self.buffer, self.env,
-                                       self.args.causal_pvalue_thres,
-                                       printlog)
-        self.causnet.load_graph(self.__causal_graph)
+        if not self.ablations.graph_fixed:
+            self.causal_graph = discover(self.buffer, self.env,
+                                        self.args.causal_pvalue_thres,
+                                        printlog)
         info = self.fit(n_iter)
         return outcomes, reward
 
@@ -241,7 +251,7 @@ class Train(Configured):
         show_plot = (showinfo == 'plot')
 
         n_sample = self.args.n_sample_warmup
-        outcomes, reward = self.warmup(n_sample, self.args.n_iter_epoch)
+        outcomes, reward = self.warmup(n_sample, self.args.n_iter_warmup)
         
         for i in range(n_epoch):
             # evaluating
@@ -256,13 +266,10 @@ class Train(Configured):
             if show_loss:
                 print('')
                 print(f"mean reward:\t{reward}")
-                print(f"loss:\t{evalinfo.loss}")
+                print(f"fitting loss:\t{evalinfo.loss}")
             if show_log_texts:
                 for k, e in evalinfo.err.items():
-                    print(f"\terror of '{k}':\t{e}")
-            if show_log_texts:
-                print("---------------------confidence-----------------------")
-                print(conf)
+                    print(f"- error of '{k}':\t{e}")
 
             # update policy
             planinfo = self.planning(self.args.n_iter_planning)
@@ -274,8 +281,8 @@ class Train(Configured):
             n_sample += self.args.n_sample_epoch
             
             # update causal graph
-            self.update_causal_graph(conf, show_log_texts)
-            self.causnet.load_graph(self.__causal_graph)
+            if not (self.ablations.graph_fixed or self.ablations.graph_offline):
+                self.update_causal_graph(conf, show_log_texts)
 
             # update causal equation
             fitinfo = self.fit(self.args.n_iter_epoch, eval=False)

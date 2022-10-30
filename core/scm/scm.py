@@ -258,6 +258,10 @@ class StructrualCausalModel:
     def valuedic(self):
         return {var.name: var.value for var in self.variables}
 
+    def parentdic(self):
+        return {var.name: {pa.name for pa in var.parents}
+                for var in self.endo_variables}
+
     def plot(self, intervened=False, format='png'):
         # biuld graph
         g = graphviz.Digraph(format=format)
