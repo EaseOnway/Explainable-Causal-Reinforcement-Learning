@@ -2,12 +2,11 @@ from typing import Dict, Sequence
 import torch
 import torch.nn as nn
 import numpy as np
+from learning import data
 
 from learning.config import Config
-from learning.networks.base import BaseNN
-from core import Batch, data
-
-import utils.tensorfuncs as T
+from ..base import BaseNN
+from ..data import Batch
 
 
 class VariableEncoder(BaseNN):
@@ -35,17 +34,16 @@ class VariableEncoder(BaseNN):
         for key, linear in self.sub_modules.items():
             self.add_module(f"{key}_encoder", linear)
 
-    def forward_all(self, datadic: Batch[torch.Tensor]):
-        out = Batch.torch(datadic.n)
+    def forward_all(self, data: Batch):
+        out = Batch(data.n)
         for var in self.sub_modules.keys():
-            if var in datadic:
-                out[var] = self.forward(var, datadic[var])
+            if var in data:
+                out[var] = self.forward(var, data[var])
         return out
 
     def forward(self, var: str, data: torch.Tensor) -> torch.Tensor:
-        x = T.batch_flat(data)
         sub_module = self.sub_modules[var]
-        return sub_module(x)
+        return sub_module(data)
 
 
 class Aggregator(BaseNN):

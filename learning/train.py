@@ -1,64 +1,78 @@
 import os
 from typing import Any, Callable, Dict, List, Literal, Optional, final
-
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 import time
-import utils as u
-import utils.tensorfuncs as T
+
 import tensorboardX
-
-from core import Buffer, Batch
+from .data import Batch
+from .buffer import Buffer
 from .causal_discovery import discover, update, ParentDict
-from .networks import CausalNet
-from .networks.planning.ddpg import DDPG
-from .config import Config, Configured
+from .causal_model import CausalNet
+from .config import Config
+from .base import Configured
+from .planning import PPO
+from core import Env
+from utils import Log
+import utils
 
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
+_LL = 'loglikelihood'
+_LOSS = 'NLL loss'
+_DONE = 'done'
+_REWARD = 'reward'
+_LOG_ROOT = './logs/'
 
 
 class Train(Configured):
 
-    def __init__(self, name: str, config: Config):
+    def __init__(self, config: Config, name: str):
         super().__init__(config)
-        self.args = config.train_args
+        print("Using following configuration:")
+        print(self.config)
+
+        self.ppo_args = self.config.ppo_args
+        self.causal_args = self.config.causal_args
+
         self.causnet = CausalNet(config)
-        self.buffer = Buffer(self.env.info.varinfos, self.args.buffersize)
-        self.opt = config.train_args.get_optimizer(self.causnet)
-        
+        self.opt = self.F.get_optmizer(self.causal_args.optim_args, self.causnet)
+        self.outer_buffer = Buffer(config, self.causal_args.buffersize)
+        self.inner_buffer = Buffer(config, config.ppo_args.buffersize)
         self.causal_graph = self.init_causal_graph()
-        self.planner = DDPG(config, self.causnet)
+        self.ppo = PPO(config)
+
+        self.__name = name
         
-        self.__logdir = './logs/' + name + '/'
-    
-    def sample(self):
-        with torch.no_grad():
-            s = self.a2t(Batch.from_sample(self.env.current_state))
-            a = self.planner.actor.forward(s, self.config.ddpg_args.explore_sd)
-            s.update(a)
-            s = self.t2a(s)
-            tran, r, done, info = \
-                self.env.step({k: v.squeeze(0) for k, v in s.data.items()})
-            return tran, r
-        
-    def collect_samples(self, n: int):
-        rewards = pd.Series(dtype=float)
-        outcomes = pd.DataFrame(columns=self.env.names_o) # type: ignore
+    def collect_warmup(self, n: int):
+        log = Log()
         for i in range(n):
-            sample, reward = self.sample()
-            self.buffer.write(sample)
-            rewards.at[i] = reward
-            outcomes.loc[i, :] = {o: float(sample[o])  # type: ignore
-                                  for o in self.env.names_o}
-        return outcomes.mean(axis=0), rewards.mean()
+            a = self.env.random_action()
+            tran, reward, done, info = self.env.step(a)
+            self.outer_buffer.write(tran, reward, done)
+            log[_REWARD] = reward
+            log[_DONE] = done
+        return log
+    
+    def collect_online(self):
+        buffer = self.inner_buffer
+        n_samples = buffer.max_size
+        log = Log()
+        
+        buffer.clear()
+        for i in range(n_samples):
+            a = self.ppo.act(self.env.current_state)
+            tran, reward, done, _ = self.env.step(a)
+            buffer.write(tran, reward, done)
+            self.outer_buffer.write(tran, reward, done)
+            log[_REWARD] = reward
+            log[_DONE] = done
+        
+        assert buffer.max_size == len(buffer)
+        return log
 
     def init_causal_graph(self):
         parent_dic = {j: {i for i in self.env.names_inputs
-                          if u.basics.prob(self.args.causal_prior)}
+                          if utils.Random.event(self.causal_args.prior)}
                       for j in self.env.names_outputs}
         return parent_dic
 
@@ -75,100 +89,61 @@ class Train(Configured):
 
     @final
     def plot_causal_graph(self, format='png'):
-        return u.visualize.plot_digraph(
+        return utils.visualize.plot_digraph(
             self.env.names_inputs + self.env.names_outputs,
             self.__causal_graph, format=format)  # type: ignore
 
-    class BatchInfo:
-        def __init__(self, loss: float, err: pd.Series):
-            self.loss = loss
-            self.err = err
-
     @final
-    def batch(self, size: int, eval=False):
-        data = self.buffer.sample_batch(size)
+    def fit_batch(self, size: int, eval=False):
+        data = self.outer_buffer.batch_random(size)
         self.causnet.train(not eval)
-        err = self.causnet.errors(self.causnet.a2t(data))
-        loss = self.causnet.loss(err)
-
+        lls = self.causnet.get_loglikeli_dic(data)
+        ll = self.causnet.loglikelihood(lls)
+        loss = -ll
+        
         if not eval:
-            self.opt.zero_grad()
             loss.backward()
-            self.opt.step()
+            self.F.optim_step(self.causal_args.optim_args,
+                              self.causnet, self.opt)
 
-        return Train.BatchInfo(float(loss),
-                               pd.Series({k: float(e) for k, e in err.items()}))
-
-    class FitInfo:
-        def __init__(self, loss_batch: np.ndarray, err_batch: pd.DataFrame):
-            self.loss_mean: float = np.mean(loss_batch)
-            self.loss_batch = loss_batch
-            self.err_mean = err_batch.mean(axis=0)
-            self.err_batch = err_batch
-
-        def show(self, errors=True, loss=True):
-            if errors:
-                self.err_batch.plot(alpha=0.5)
-            if loss:
-                plt.plot(self.loss_batch, linewidth=2, label="loss", color='k')
-            plt.legend()
-            plt.show()
+        return float(loss), {k: float(e) for k, e in lls.items()}
 
     @final
     def fit(self, n_iter: int, eval=False):
         '''
         train network with fixed causal graph.
         '''
+        args = self.causal_args.optim_args
+        log = Log()
 
-        losses = np.zeros(n_iter, dtype=float)
-        errors = pd.DataFrame(columns=list(self.env.names_outputs))
-        w = self.args.convergence_window
         for i_iter in range(n_iter):
-            if self.args.check_convergence and i_iter > w:
-                last_window = losses[max(0, i_iter - 2 * w): i_iter - w]
-                this_window = losses[i_iter - w: i_iter]
-                if np.min(last_window) < np.min(this_window):
-                    losses = losses[:i_iter]
-                    break
+            loss, lls = self.fit_batch(args.batchsize, eval)
+            log[_LOSS] = loss
+            for k, ll in lls.items():
+                log[_LL, k] = ll
 
-            info = self.batch(self.args.batchsize, eval)
-            losses[i_iter] = info.loss
-            errors.loc[i_iter, ] = info.err
+        return log
 
-        return Train.FitInfo(losses, errors)
-
-    class PlanInfo:
-        def __init__(self, actor_loss_batch: np.ndarray, critic_loss_batch: np.ndarray):
-            self.actor_loss_batch = actor_loss_batch
-            self.critic_loss_batch = critic_loss_batch
-            self.actor_loss_mean = np.mean(actor_loss_batch)
-            self.critic_loss_mean = np.mean(critic_loss_batch)
-
-        def show(self):
-            plt.plot(self.actor_loss_batch, label="actor loss")
-            plt.plot(self.critic_loss_batch, label="critic loss")
-            plt.legend()
-            plt.show()
+    def __show_fit_log(self, log: Log):
+        Log.figure(figsize=(12, 5))  # type: ignore
+        Log.subplot(121, title=_LOSS)
+        log[_LOSS].plot(color='k')
+        Log.subplot(122, title=_LL)
+        log[_LL].plots(self.env.names_outputs)
+        Log.show()
     
     @final
-    def planning(self, n_iter: int):
+    def planning(self):
         '''
-        train network with fixed causal graph.
+        ppo
         '''
+    
+        loss = self.ppo.optimize(self.inner_buffer)
+        return loss
+    
 
-        losses_a = np.zeros(n_iter, dtype=float)
-        losses_c = np.zeros(n_iter, dtype=float)
-
-        for i_iter in range(n_iter):
-            batch = self.a2t(self.buffer.sample_batch(self.args.batchsize))
-            loss_a, loss_c = self.planner.train_batch(batch)
-            
-            losses_a[i_iter] = loss_a
-            losses_c[i_iter] = loss_c
-
-        return Train.PlanInfo(losses_a, losses_c)
-
-    def update_causal_graph(self, conf: pd.DataFrame, showinfo=True):
+    def update_causal_graph(self, showinfo=True):
+        raise NotImplementedError
         if showinfo:
             print("---------------------confidence-----------------------")
             print(conf)
@@ -176,122 +151,123 @@ class Train(Configured):
         edges_to_check = []
         for j, confj in conf.items():
             for i, confij in confj.items():
-                if u.basics.prob(1 - confij):
+                if u.Random.event(1 - confij):
                     edges_to_check.append((i, j))
 
-        thres = self.args.causal_pvalue_thres
-        prior = self.args.causal_prior
-        if self.args.adaptive_thres and thres < prior:
-            thres = prior - (prior - thres) * len(self.buffer) / self.buffer.max_size
+        thres = self.causal_args.pvalue_thres
+        prior = self.causal_args.prior
+        if self.causal_args.adaptive_thres and thres < prior:
+            thres = prior - (prior - thres) * len(self.outer_buffer) / self.outer_buffer.max_size
         
-        update(self.__causal_graph, self.buffer, *edges_to_check,
+        update(self.__causal_graph, self.outer_buffer, *edges_to_check,
                thres=thres, showinfo=showinfo, inplace=True)
         self.causnet.load_graph(self.__causal_graph)
 
         for i, j in edges_to_check:
             conf.loc[i, j] = 1
 
-    def __eval(self, conf: pd.DataFrame):
-        eval = self.batch(self.args.batchsize_eval, eval=True)
-        decay = self.args.conf_decay
-        prior = self.args.causal_prior
-        for j in self.env.names_outputs:
-            relative_err = (eval.err.loc[j]) / (eval.err.min() + 1.0)
-            pas = self.__causal_graph[j]
-            if len(pas) > 0:
-                conf.loc[pas, j] *= np.exp(  # type: ignore
-                    - decay * (len(pas) / len(self.env.names_inputs)) * (1 - prior)
-                )  
-            pas = list(set(self.env.names_inputs) - set(self.__causal_graph[j]))
-            conf.loc[pas, j] *= np.exp(- relative_err * decay)  # type: ignore
-        return eval
-
-    class TrainInfo:
-        def __init__(self, loss_epoch: np.ndarray, err_epoch: pd.DataFrame,
-                     outcome_epoch: pd.DataFrame):
-            self.loss_epoch = loss_epoch
-            self.err_epoch = err_epoch
-            self.outcome_epoch = outcome_epoch
-
-        def show(self, errors=True, loss=True):
-            if errors:
-                self.err_epoch.plot(alpha=0.5)
-            if loss:
-                plt.plot(self.loss_epoch, linewidth=2, label="loss", color='k')
-            plt.legend()
-            plt.show()
-
-            self.outcome_epoch.plot()
-            plt.show()
+    def __eval(self):
+        return self.fit(self.causal_args.n_iter_eval, eval=True)
     
     def warmup(self, n_samples, n_iter, printlog=True):
-        self.buffer.clear()
-        outcomes, reward = self.collect_samples(n_samples)
+        self.outer_buffer.clear()
+        log_collect = self.collect_warmup(n_samples)
         if not self.ablations.graph_fixed:
-            self.causal_graph = discover(self.buffer, self.env,
-                                        self.args.causal_pvalue_thres,
-                                        printlog)
-        info = self.fit(n_iter)
-        return outcomes, reward
+            self.causal_graph = discover(self.outer_buffer, self.env,
+                                         self.causal_args.pvalue_thres,
+                                         printlog)
+        log_fit = self.fit(n_iter)
+        return log_collect, log_fit
+    
+    def __get_summary_writer(self):
+        path = _LOG_ROOT + '/' + str(self.env) + '/' + self.__name + '/'
+        if not os.path.exists(path):
+            os.makedirs(path)
+        
+        run_names = os.listdir(path)
+        i = 0
+        while True:
+            i += 1
+            run_name = "run-%d" % i
+            if run_name not in run_names:
+                break
+        path = path + run_name + '/'
 
+        os.makedirs(path)
+        self.config.to_txt(path + 'config.txt')
+
+        writer = tensorboardX.SummaryWriter(path)
+        return writer
+        
     def run(self, n_epoch: int, 
             showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):
-        logdir = self.__logdir + "run-" + time.strftime("%Y%m%d-%H-%M-%S", time.localtime())
-        if not os.path.exists(logdir):
-            os.makedirs(logdir)
-        writer = tensorboardX.SummaryWriter(logdir)
-
-        conf = pd.DataFrame(
-            index=self.env.names_inputs, columns=self.env.names_outputs, # type: ignore
-            data=1.0) 
-        conf.Name = 'confidence'
+        writer = self.__get_summary_writer()
 
         show_loss = (showinfo is not None)
         show_log_texts = (showinfo == 'verbose' or showinfo == 'plot')
         show_plot = (showinfo == 'plot')
+        log_reward = Log()
 
-        n_sample = self.args.n_sample_warmup
-        outcomes, reward = self.warmup(n_sample, self.args.n_iter_warmup)
+        n_sample = self.causal_args.n_sample_warmup
+        log_step, log_fit = self.warmup(n_sample, self.causal_args.n_iter_warmup)
+        reward = log_step[_REWARD].mean
+
+        if show_plot:
+            self.__show_fit_log(log_fit)
         
         for i in range(n_epoch):
             # evaluating
             print(f"epoch {i}: ", end='')
-            evalinfo = self.__eval(conf)
-            writer.add_scalar('fitting loss', evalinfo.loss, n_sample)
-            writer.add_scalars('fitting error', evalinfo.err.to_dict(), n_sample)  # type: ignore
-            writer.add_scalar('reward', reward, n_sample)
-            writer.add_scalars('outcome', outcomes.to_dict(), n_sample)  # type: ignore
+            eval = self.__eval()
+            writer.add_scalar('fitting loss', eval[_LOSS].mean, n_sample)
+            writer.add_scalars(
+                'log-likelihood',
+                {k: eval[_LL, k].mean for k in self.env.names_outputs},
+                n_sample)
+            
+            log_reward['step'] = n_sample
+            log_reward(reward)
 
             # show running statistics
             if show_loss:
                 print('')
                 print(f"mean reward:\t{reward}")
-                print(f"fitting loss:\t{evalinfo.loss}")
+                print(f"fitting loss:\t{eval[_LOSS].mean}")
             if show_log_texts:
-                for k, e in evalinfo.err.items():
-                    print(f"- error of '{k}':\t{e}")
-
-            # update policy
-            planinfo = self.planning(self.args.n_iter_planning)
-            writer.add_scalar('actor loss', planinfo.actor_loss_mean, n_sample)
-            writer.add_scalar('critic loss', planinfo.critic_loss_mean, n_sample)
+                for k in self.env.names_outputs:
+                    print(f"log-likelihood of '{k}':\t{eval[_LL, k].mean}")
 
             # collect new samples
-            outcomes, reward = self.collect_samples(self.args.n_sample_epoch)
-            n_sample += self.args.n_sample_epoch
+            log_step = self.collect_online()
+            reward = log_step[_REWARD].mean
+
+            # update policy
+            plan_loss = self.planning()
+            writer.add_scalar('actor loss', plan_loss['actor'].mean, n_sample)
+            writer.add_scalar('critic loss', plan_loss['critic'].mean, n_sample)
+            writer.add_scalar('reward', reward, n_sample)
+            
+            if show_loss:
+                print(f"actor loss:\t{plan_loss['actor'].mean}")
+                print(f"critic loss:\t{plan_loss['critic'].mean}")
+
+            n_sample += self.ppo_args.buffersize
             
             # update causal graph
             if not (self.ablations.graph_fixed or self.ablations.graph_offline):
-                self.update_causal_graph(conf, show_log_texts)
+                self.update_causal_graph(show_log_texts)
 
             # update causal equation
-            fitinfo = self.fit(self.args.n_iter_epoch, eval=False)
+            fit_log = self.fit(self.causal_args.n_iter_train, eval=False)
             
             # show running statistics
             if show_plot:
-                fitinfo.show()
-                planinfo.show()
+                self.__show_fit_log(fit_log)
+                self.ppo.show_loss(plan_loss)
 
             print("Done.")
         
+        if show_plot:
+            log_reward.plot(x = log_reward['step'].data)
+
         writer.close()

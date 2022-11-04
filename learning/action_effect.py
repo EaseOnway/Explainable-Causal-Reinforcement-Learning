@@ -3,19 +3,18 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 import numpy as np
 import torch
 
-from .networks.causal_model.inferrer import Inferrer
-from .networks.causal_model import CausalNet
-from core import Batch
-import utils.tensorfuncs as T
+from .causal_model.inferrer import Inferrer
+from .causal_model import CausalNet
+from .data import Batch
 from utils.visualize import plot_digraph
-from .config import Configured, Config
+from .config import Config
+from .base import Configured
 
 import core.scm as scm
 
 
 class ActionEffect(Configured):
-    def __init__(self, network: CausalNet,
-                 action_datadic: Dict[str, np.ndarray],
+    def __init__(self, network: CausalNet, action: Dict[str, Any],
                  attn_thres=0.):
         super().__init__(network.config)
         self.network = network
@@ -25,23 +24,23 @@ class ActionEffect(Configured):
         # 2. the action-effect embedding of each structural function
         # 3. the attention scores of each structrual function
 
-        batch = Batch.from_sample(action_datadic)
+        raw = Batch.from_sample(self.as_raws(action))
+
         with torch.no_grad():
-            actions = network.encoder.forward_all(network.a2t(batch))
+            batch = raw.kapply(self.raw2input)
+            actions = network.encoder.forward_all(batch)
             a_embs: Dict[str, torch.Tensor] = {}
             causations: Dict[str, Tuple[str, ...]] = {}
             weights: Dict[str, torch.Tensor] = {}
             for var in self.env.names_outputs:
                 parents_a = network.parent_dic_a[var]
                 parents_s = network.parent_dic_s[var]
-                actions_pa = T.safe_stack([actions[pa] for pa in parents_a],
-                                          (1, self.config.dims.action_encoding),
-                                          **self.torchargs)
+                actions_pa = self.T.safe_stack([actions[pa] for pa in parents_a],
+                                               (1, self.config.dims.action_encoding))
                 inferrer = self.network.inferrers[var]
                 a_emb = inferrer.aggregator.forward(actions_pa)
                 kstates = self.network.k_model.forward(parents_s)
                 attn = inferrer.get_attn_scores(a_emb, kstates)
-                
                 a_embs[var] = a_emb
                 if len(parents_s) > 0:
                     selected = (attn >= attn_thres/len(parents_s))
@@ -58,25 +57,25 @@ class ActionEffect(Configured):
         self.__causations = causations
         self.__weights = weights
     
-
     def infer(self, var: str, causal_states: Sequence[Any]):
         with torch.no_grad():
             weight = self.__weights[var]
             emb_a = self.__embs_a[var]
             caus = self.__causations[var]
             states = []
-            for pa, s in zip(caus, causal_states):
-                v = self.v(pa)
-                s = np.array(s, v.dtype).reshape(1, *v.shape)
-                states.append(self.network.encoder.forward(
-                    pa, T.a2t(s, **self.torchargs)))
-            states = T.safe_stack(states, (1, self.dims.state_encoding),
-                                  **self.torchargs)
+            for pa, state in zip(caus, causal_states):
+                raw = self.as_raw(pa, state)
+                raw = raw.unsqueeze_(0)
+                s = self.raw2input(pa, raw)
+                states.append(self.network.encoder.forward(pa, s))
+            states = self.T.safe_stack(states, (1, self.dims.state_encoding))
             inferrer = self.network.inferrers[var]
-            out = inferrer.attn_infer(weight, emb_a, states)
-            out = inferrer.decoder(out)
-            out = inferrer.predict(out)
-            out = np.squeeze(out, axis=0)
+            temp: torch.Tensor = inferrer.attn_infer(weight, emb_a, states)
+            temp = inferrer.feed_forward(temp)
+            distri = inferrer.decoder.forward(temp)
+            temp = distri.mode
+            temp = temp.squeeze(0)
+            out = self.T.t2a(temp, self.v(var).dtype.numpy)
         return out
     
     def __get_causal_eq(self, var: str):
@@ -107,5 +106,5 @@ class ActionEffect(Configured):
 
     def plot(self, format='png'):
         return plot_digraph(
-            self.config.keys_out, self.__causations,  # type: ignore
+            self.config.env.names_outputs, self.__causations,  # type: ignore
             format=format)

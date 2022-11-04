@@ -3,19 +3,18 @@ from typing import Any, Callable, Dict, Sequence, Optional
 import numpy as np
 
 from .scm import ExoVar, EndoVar, StructrualCausalModel
-from .env import EnvInfo, Env, _KArrays
+from .env import EnvInfo, Env
 
 
 class CausalMdp(Env):
 
-    def __init__(self, envinfo: EnvInfo,
-                 task_weights: Optional[Dict[str, float]] = None):
-        super().__init__(envinfo, task_weights)
+    def __init__(self, envinfo: EnvInfo):
+        super().__init__(envinfo)
         self.__scm = StructrualCausalModel()
 
         self.__undefined = set(self.names_outputs)
         for name in self.names_inputs:
-            self.__scm.add(ExoVar(name, self.var(name).default))
+            self.__scm.add(ExoVar(name, self.var(name)))
     
     @property
     def scm(self):
@@ -23,7 +22,7 @@ class CausalMdp(Env):
         
     def define(self, name: str, parents: Sequence[str], eq: Callable):
         if name in self.names_s:
-            name = self.name_next_step(name)
+            name = self.name_next(name)
         if name not in self.__undefined or name not in self.names_outputs:
             raise ValueError(f"{name} is not a endogenous variable of the environment"
                              " or has already been defined.")
@@ -35,5 +34,4 @@ class CausalMdp(Env):
 
         self.__scm.assign(**states_and_actions)
         outs = {name: self.__scm[name].value for name in self.names_outputs}
-        outs = self._2karrays(outs)
         return outs, self.__scm.valuedic()

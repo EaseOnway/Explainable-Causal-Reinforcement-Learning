@@ -150,3 +150,7 @@ cython_debug/
 
 # tensorboard summaries
 logs/
+
+# config
+*.config.json
+config.json

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 import utils
-from core.data import Buffer
+from .buffer import Buffer
 from core.env import Env
 
 
@@ -17,6 +17,8 @@ def discover(buffer: Buffer, env: Env, thres=0.05, log=True
         key: set() for key in env.names_outputs}
 
     data = buffer.read_all()
+    data = {k: utils.TensorOperator.t2a(v, float)
+            for k, v in data.items()}
 
     for i in env.names_inputs:
         for j in env.names_outputs:
@@ -45,6 +47,8 @@ def update(old: ParentDict, buffer: Buffer,
         new = {k: v.copy() for k, v in old.items()}
     
     data = buffer.read_all()
+    data = {k: v.numpy().astype(float) for k, v in data.items()}
+    
     for i, j in edges:
         try:
             new[j].remove(i)

@@ -1,11 +1,10 @@
 import torch
-from core import Buffer, CausalMdp, scm, EnvInfo
+from core import CausalMdp, scm, EnvInfo, ContinuousNormal, Categorical, Boolean
 import learning.causal_discovery as causal_discovery
 
 import learning
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import learning.config as cfg
 import utils as u
 
@@ -14,56 +13,65 @@ np.set_printoptions(precision=4)
 
 
 envinfo= EnvInfo()
-envinfo.state('x')
-envinfo.state('y')
-envinfo.state('vx')
-envinfo.state('vy')
-envinfo.outcome('d')
-envinfo.outcome('v')
-envinfo.action('ax')
-envinfo.action('ay')
+envinfo.state('x', ContinuousNormal(scale=None))
+envinfo.state('y', ContinuousNormal(scale=None))
+envinfo.outcome('d', ContinuousNormal(scale=None))
+envinfo.outcome('g', Boolean())
+envinfo.action('vx', ContinuousNormal(scale=None))
+envinfo.action('vy', ContinuousNormal(scale=None))
+
 
 
 class MyMdp(CausalMdp):
+    
 
     def __init__(self, dt=0.1):
-        super().__init__(envinfo, {'v': -1, 'd': -1})
+        super().__init__(envinfo)
         
         self.define('x', ['x', 'vx'], lambda x, v: x + v * dt)
         self.define('y', ['y', 'vy'], lambda y, v: y + v * dt)
-        self.define('vx', ['vx', 'ax'], lambda v, a: v + a * dt)
-        self.define('vy', ['vy', 'ay'], lambda v, a: v + a * dt)
+
+        vs = [-1, 0, 1]
+
         self.define('d', ['x', 'y'], lambda x, y: np.sqrt(x*x + y*y))
-        self.define('v', ['vx', 'vy'], lambda x, y: np.sqrt(x*x + y*y))
+        self.define('g', ['x', 'y'],
+                    lambda x, y: np.max(np.abs([x, y])) < 0.2)
     
     def init(self):
-        return {'x': np.random.normal(), 'y': np.random.normal(), 'vx': 0, 'vy': 0}
+        return {'x': np.random.normal(), 'y': np.random.normal()}
     
     def done(self, transition, info) -> bool:
-        x, y = u.basics.select(transition, ['x\'', 'y\''])
-        if np.abs(x) > 5 or np.abs(y) > 5:
+        x, y, g = u.Collections.select(transition, ['x\'', 'y\'', 'g'])
+        if np.abs(x) > 5 or np.abs(y) > 5 or g == True:
             return True
         return False
     
-    def sample(self):
-        return self._2karrays({'ax': np.random.normal(), 'ay': np.random.normal()})
+    def reward(self, transition) -> float:
+        g, d = u.Collections.select(transition, ['g', 'd'])
+        return 10 if g else -d
+    
+    def random_action(self):
+        return {'vx': np.random.normal(), 'vy': np.random.normal()}
+        # return {'vx': np.random.randint(3), 'vy': np.random.randint(3)}
 
 
 mdp = MyMdp()
-mdp.scm.plot().view('./causal_graph.gv')
+# mdp.scm.plot().view('./causal_graph.gv')
 
-
-config = cfg.Config(mdp,
-    batchsize=128, n_iter_epoch=100, convergence_window=10,
-    n_iter_planning = 5, check_convergence=False, n_iter_warmup=200,
-    batchsize_eval=256, n_sample_epoch=500, explore_sd=0.2,
-    n_sample_warmup=1000, conf_decay=0.05, causal_prior=0.4,
-    causal_pvalue_thres=0.05, buffersize=5000,
-    device=torch.device('cuda'), gamma=0.9,
-    graph_fixed=True,
-)
-
-trainer = learning.Train("test", config)
+config = cfg.Config(mdp)
+config.causal_args.buffersize = 20000
+config.ppo_args.buffersize = 2000
+config.causal_args.n_sample_warmup = 2000
+config.device = torch.device('cuda')
+config.ppo_args.gamma = 0.9
+config.ablations.graph_fixed = True
+config.causal_args.n_iter_train = 50
+config.causal_args.n_iter_eval = 5
+config.causal_args.optim_args.batchsize = 512
+config.ppo_args.optim_args.batchsize = 512
+config.ppo_args.n_epoch_actor = 10
+config.ppo_args.n_epoch_critic = 30
+trainer = learning.Train(config, "test")
 trainer.causal_graph = mdp.scm.parentdic()
 
 
@@ -71,21 +79,18 @@ trainer.run(500, 'verbose')
 
 
 state = mdp.init()
-action = mdp.sample()
+action = mdp.random_action()
 
 ae = learning.ActionEffect(
-    trainer.causnet,
-    action,
-    attn_thres=0.2,
+    trainer.causnet, action, attn_thres=0.2,
 )
+
 
 ae.print_info()
 m = ae.create_causal_model()
 m.plot().view('./action_effect_graph.gv')
 m.assign(**state)
-truth, r, done, info = mdp.step(u.basics.merge_dic(state, action))
+truth, r, done, info = mdp.step(u.Collections.merge_dic(state, action))
 print(action)
 for var in m.endo_variables:
     print(f"{var.name}: predicted[{var.value}], truth[{truth[var.name]}]")
-
-

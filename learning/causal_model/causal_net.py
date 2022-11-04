@@ -5,13 +5,13 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from core import Batch, Buffer
+import torch.distributions as D
 
+from ..data import Batch, Distributions, Transitions
 from ..base import BaseNN
-from .encoding import VariableEncoder
-from .inferrer import Inferrer, StateKey
+from .encoder import VariableEncoder
+from .inferrer import StateKey, DistributionInferrer
 from learning.config import Config
-import utils.tensorfuncs as T
 
 
 _ParentDic = Dict[str, Tuple[str, ...]]
@@ -34,11 +34,11 @@ class CausalNet(BaseNN):
         self.parent_dic_a: _ParentDic = {}
 
         self.encoder = VariableEncoder(config)
-        self.inferrers: Dict[str, Inferrer] = {}
+        self.inferrers: Dict[str, DistributionInferrer] = {}
         self.k_model = StateKey(config)
 
         for name in self.env.names_outputs:
-            self.inferrers[name] = Inferrer(self.v(name).shape, config)
+            self.inferrers[name] = DistributionInferrer(self.v(name), config)
             self.add_module(f'{name}_inferrer', self.inferrers[name])
 
         # init parameters
@@ -61,11 +61,10 @@ class CausalNet(BaseNN):
             self.parent_dic_a[name] = tuple(sorted(
                 pa for pa in parents if pa in self.env.names_a))
 
-    def forward(self, datadic: Batch[torch.Tensor]):
-        n = datadic.n  # batchsize
-
-        encoded_data = self.encoder.forward_all(datadic)
-        outs = Batch.torch(n)
+    def forward(self, raw_data: Batch) -> Distributions:
+        data = raw_data.kapply(self.raw2input)
+        encoded_data = self.encoder.forward_all(data)
+        outs = Distributions(data.n)
 
         for var in self.env.names_outputs:
             inferrer = self.inferrers[var]
@@ -78,18 +77,17 @@ class CausalNet(BaseNN):
 
         return outs
 
-    def errors(self, datadic: Batch[torch.Tensor]):
-        errors: Dict[str, torch.Tensor] = {}
-        predicted = self.forward(datadic)
-        for key, pred in predicted.items():
-            inferrer = self.inferrers[key]
-            target = datadic[key]
-            errors[key] = inferrer.error(pred, target)
-        return errors
+    def get_loglikeli_dic(self, raw_data: Batch):
+        '''get the dictionary of log-likelihoood'''
+        
+        labels = raw_data.select(self.env.names_outputs).kapply(self.raw2label)
+        predicted = self.forward(raw_data)
+        logprobs = predicted.logprobs(labels)
+        return {k: torch.mean(v) for k, v in logprobs.items()}
 
-    def loss(self, errors: Dict[str, torch.Tensor]):
-        errs = [err for err in errors.values()]
-        return torch.sum(torch.stack(errs))
+    def loglikelihood(self, lldic: Dict[str, torch.Tensor]):
+        ls = list(lldic.values())
+        return torch.sum(torch.stack(ls))
 
     def get_attn_dic(self):
         out: Dict[str, torch.Tensor] = {}

@@ -1,14 +1,14 @@
 from typing import Sequence, Tuple, Optional
 import torch
 import torch.nn as nn
+import torch.distributions as D
 import numpy as np
-from core.data import Batch
-
+from utils import Shaping
+from learning.data import Batch
 from learning.config import Config
-from .encoding import Aggregator
+from .encoder import Aggregator
 from ..base import BaseNN
-import utils.tensorfuncs as T
-import utils.shaping as shaping
+from core.vtype import VType
 
 
 class StateKey(BaseNN):
@@ -25,15 +25,13 @@ class StateKey(BaseNN):
 
 
 class Inferrer(BaseNN):
-    def __init__(self, shape_out: Tuple[int, ...], config: Config):
+    def __init__(self, config: Config):
         super().__init__(config)
-        self._shape_out = shape_out
-        self._size_out = shaping.get_size(shape_out)
 
         da, ds = self.dims.action_encoding, self.dims.state_encoding
         dv, dk = self.dims.inferrer_value, self.dims.inferrer_key
         dh_agg = self.dims.action_aggregator_hidden
-        dh_dec = self.dims.inferrer_decoder_hidden
+        dff = self.dims.inferrer_feed_forward
 
         if config.ablations.recur:
             d = max(da, ds)
@@ -42,14 +40,11 @@ class Inferrer(BaseNN):
             self.aggregator = Aggregator(da, dk, dh_agg, config)
             self.linear_vs = nn.Linear(ds, dv, **self.torchargs)
             self.linear_va = nn.Linear(dk, dv, **self.torchargs)
-
-        self.decoder = nn.Sequential(
+        
+        self.feed_forward = nn.Sequential(
+            nn.Linear(dv, dv, **self.torchargs),
             nn.LeakyReLU(),
-            nn.Linear(dv, dh_dec, **self.torchargs),
-            nn.LeakyReLU(),
-            nn.Linear(dh_dec, dh_dec, **self.torchargs),
-            nn.PReLU(dh_dec, **self.torchargs),
-            nn.Linear(dh_dec, self._size_out, **self.torchargs)
+            nn.Linear(dv, dff, **self.torchargs)
         )
 
         self.attn: torch.Tensor
@@ -62,7 +57,7 @@ class Inferrer(BaseNN):
                     # parent_states * batch * dim_s
                     states: torch.Tensor,
                     ):
-        
+
         da, ds = self.dims.action_encoding, self.dims.state_encoding
         batchsize = actions.shape[1]
         assert states.shape[1] == batchsize
@@ -115,9 +110,7 @@ class Inferrer(BaseNN):
         # out: batch * dim_v
         return out
 
-    def __attn_infer(self,
-                     actions: torch.Tensor,
-                     kstates: torch.Tensor,
+    def __attn_infer(self, actions: torch.Tensor, kstates: torch.Tensor,
                      states: torch.Tensor):
         # actions: num_actions * batch * dim_a
         # kstates: num_states * dim_k
@@ -134,15 +127,14 @@ class Inferrer(BaseNN):
         self.attn = attn
         return out
 
-    @staticmethod
-    def input_from(action_keys: Sequence[str], state_keys: Sequence[str],
-                   data: Batch[torch.Tensor], key_model: StateKey):
-        actions = T.safe_stack([data[k] for k in action_keys],
-                               (data.n, key_model.dims.action_encoding),
-                                **key_model.torchargs)
-        states = T.safe_stack([data[k] for k in sorted(state_keys)],
-                              (data.n, key_model.dims.state_encoding),
-                               **key_model.torchargs)
+    def input_from(self, action_keys: Sequence[str], state_keys: Sequence[str],
+                   encoded_data: Batch, key_model: StateKey):
+        T = self.T
+        dims = self.dims
+        actions = T.safe_stack([encoded_data[k] for k in action_keys],
+                               (encoded_data.n, dims.action_encoding))
+        states = T.safe_stack([encoded_data[k] for k in sorted(state_keys)],
+                              (encoded_data.n, dims.state_encoding))
         kstates = key_model.forward(state_keys)
         return actions, kstates, states
 
@@ -153,11 +145,41 @@ class Inferrer(BaseNN):
         else:
             x = self.__attn_infer(actions, kstates, states)
 
-        out: torch.Tensor = self.decoder(x)  # batchsize * dim_out
-        return out.view(out.shape[0], *self._shape_out)
+        x = self.feed_forward(x)
+        return x
+
+
+class DistributionDecoder(BaseNN):
+    def __init__(self, dim_in: int, vtype: VType, config: Config):
+        super().__init__(config)
+        self._vtype = vtype
+        self._ptype = vtype.ptype
+
+        dh_dec = self.dims.decoder_hidden
+
+        self.sub_decoders = {key: nn.Sequential(
+            nn.LeakyReLU(),
+            nn.Linear(dim_in, dh_dec, **self.torchargs),
+            nn.PReLU(dh_dec, **self.torchargs),
+            nn.Linear(dh_dec, dim, **self.torchargs),
+        ) for key, dim in self._ptype.param_dims.items()}
+        for param, decoder in self.sub_decoders.items():
+            self.add_module(f"{param} decoder", decoder)
+
+    def forward(self, x):
+        params = {k: decoder(x) for k, decoder in self.sub_decoders.items()}
+        out = self._ptype(**params)
+        return out
+
+
+class DistributionInferrer(Inferrer):
+    def __init__(self, vtype: VType, config: Config):
+        super().__init__(config)
+        dff = config.dims.inferrer_feed_forward
+        self.decoder = DistributionDecoder(dff, vtype, config)
     
-    def error(self, out: torch.Tensor, target: torch.Tensor):
-        return torch.mean(torch.square(target - out))
-    
-    def predict(self, out: torch.Tensor) -> np.ndarray:
-        return T.t2a(out)
+    def forward(self, actions: torch.Tensor, kstates: torch.Tensor,
+                states: torch.Tensor):
+        x = super().forward(actions, kstates, states)
+        out = self.decoder.forward(x)
+        return out
