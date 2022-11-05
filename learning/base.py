@@ -7,8 +7,9 @@ import torch.distributions as D
 from .config import *
 from .data import Batch, Distributions, Transitions
 from core import VType, DType
-from core.env import _NamedValues
+
 import utils as u
+from utils.typings import *
 
 
 class Functional:
@@ -111,8 +112,8 @@ class Configured:
         return tensor
     
     @final
-    def as_raws(self, kvalues: _NamedValues, device: Optional[Any] = None)\
-            -> Dict[str, torch.Tensor]:
+    def as_raws(self, kvalues: NamedValues, device: Optional[Any] = None)\
+            -> NamedTensors:
         return {k: self.as_raw(k, v, device) for k, v in kvalues.items()}
 
     def raw2input(self, name: str, raw: torch.Tensor):

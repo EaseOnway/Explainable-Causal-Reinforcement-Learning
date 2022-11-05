@@ -47,9 +47,14 @@ class MyMdp(CausalMdp):
         return False
     
     def reward(self, transition) -> float:
-        g, d = u.Collections.select(transition, ['g', 'd'])
-        return 10 if g else -d
-    
+        x, y, g = u.Collections.select(transition, ['x\'', 'y\'', 'g'])
+        if np.abs(x) > 5 or np.abs(y) > 5:
+            return -10
+        elif g == True:
+            return 10
+        else:
+            return -1
+
     def random_action(self):
         return {'vx': np.random.normal(), 'vy': np.random.normal()}
         # return {'vx': np.random.randint(3), 'vy': np.random.randint(3)}
@@ -64,6 +69,9 @@ config.ppo_args.buffersize = 2000
 config.causal_args.n_sample_warmup = 2000
 config.device = torch.device('cuda')
 config.ppo_args.gamma = 0.9
+config.ppo_args.gae_lambda = 0.9
+config.ppo_args.entropy_penalty = 0.01
+config.ppo_args.kl_penalty = 0.1
 config.ablations.graph_fixed = True
 config.causal_args.n_iter_train = 50
 config.causal_args.n_iter_eval = 5
@@ -75,7 +83,7 @@ trainer = learning.Train(config, "test")
 trainer.causal_graph = mdp.scm.parentdic()
 
 
-trainer.run(500, 'verbose')
+trainer.run(50, 'verbose')
 
 
 state = mdp.init()

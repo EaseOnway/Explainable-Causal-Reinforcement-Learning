@@ -111,6 +111,7 @@ class PPOArgs(_BaseConfig):
         super().__init__()
 
         self.gamma = 0.98
+        self.gae_lambda = 0.9
         self.kl_penalty = 0.1
         self.entropy_penalty = 0.01
         self.n_epoch_critic = 5

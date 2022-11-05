@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from .basics import Shaping
+from .typings import Shape
 
 
 class TensorOperator:
@@ -24,13 +25,13 @@ class TensorOperator:
         x = torch.from_numpy(array).to(**self.torchargs)
         return x
 
-    def safe_stack(self, tensors: List[Tensor], datashape: Shaping.Shape):
+    def safe_stack(self, tensors: List[Tensor], datashape: Shape):
         if len(tensors) > 0:
             return torch.stack(tensors)
         else:
             return torch.zeros((0, *datashape), **self.torchargs)
 
-    def safe_cat(self, tensors: List[Tensor], datashape: Shaping.Shape, dim: int):
+    def safe_cat(self, tensors: List[Tensor], datashape: Shape, dim: int):
         if len(tensors) > 0:
             return torch.cat(tensors, dim=dim)
         else:

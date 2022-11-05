@@ -7,6 +7,7 @@ from .causal_model.inferrer import Inferrer
 from .causal_model import CausalNet
 from .data import Batch
 from utils.visualize import plot_digraph
+from utils.typings import NamedTensors
 from .config import Config
 from .base import Configured
 
@@ -29,9 +30,9 @@ class ActionEffect(Configured):
         with torch.no_grad():
             batch = raw.kapply(self.raw2input)
             actions = network.encoder.forward_all(batch)
-            a_embs: Dict[str, torch.Tensor] = {}
+            a_embs: NamedTensors = {}
             causations: Dict[str, Tuple[str, ...]] = {}
-            weights: Dict[str, torch.Tensor] = {}
+            weights: NamedTensors = {}
             for var in self.env.names_outputs:
                 parents_a = network.parent_dic_a[var]
                 parents_s = network.parent_dic_s[var]

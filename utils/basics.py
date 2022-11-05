@@ -1,4 +1,5 @@
 from typing import Any, Iterable, Tuple, Union, Sequence
+from .typings import ShapeLike, Shape
 
 import numpy as np
 
@@ -44,8 +45,8 @@ class Random:
 
 class Shaping:
 
-    ShapeLike = Union[int, Sequence[int]]
-    Shape = Tuple[int, ...]
+    Shape = Shape
+    ShapeLike = ShapeLike
 
     @staticmethod
     def as_shape(shape: ShapeLike) -> Shape:

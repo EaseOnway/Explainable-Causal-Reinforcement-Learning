@@ -3,6 +3,7 @@ import abc
 from utils import Shaping
 import core.vtype as vtype
 from enum import Enum
+from utils.typings import NamedValues, SortedNames
 
 
 class EnvInfo:
@@ -33,9 +34,6 @@ class EnvInfo:
         self.outcome_names.add(name)
 
 
-_NamedValues = Dict[str, Any]
-
-
 class Env(abc.ABC):
     @staticmethod
     @final
@@ -47,13 +45,14 @@ class Env(abc.ABC):
 
     def __init__(self, info: EnvInfo):
         self.info = info
-        self.__names_a = tuple(sorted(info.action_names))
-        self.__names_s = tuple(sorted(info.state_names))
-        self.__names_next_s = tuple(self.name_next(name) for name in self.__names_s)
+        self.__names_a: SortedNames = tuple(sorted(info.action_names))
+        self.__names_s: SortedNames = tuple(sorted(info.state_names))
+        self.__names_next_s: SortedNames = tuple(self.name_next(name) for name in self.__names_s)
         self.__nametuples_s = tuple(zip(self.__names_s, self.__names_next_s))
-        self.__names_o = tuple(sorted(info.outcome_names))
-        self.__names_inputs = self.__names_s + self.__names_a
-        self.__names_outputs = self.__names_o + self.__names_next_s
+        self.__names_o: SortedNames = tuple(sorted(info.outcome_names))
+        self.__names_inputs: SortedNames = tuple(sorted(self.__names_s + self.__names_a))
+        self.__names_outputs: SortedNames = tuple(sorted(self.__names_o + self.__names_next_s))
+        self.__names_all: SortedNames = tuple(sorted(self.__names_inputs + self.__names_outputs))
         self.__num_a = len(self.__names_a)
         self.__num_s = len(self.__names_s)
         self.__num_o = len(self.__names_o)
@@ -72,7 +71,7 @@ class Env(abc.ABC):
         self.__current_state = self.init(*args, **kargs)
     
 
-    def step(self, action: _NamedValues) -> Tuple[_NamedValues,
+    def step(self, action: NamedValues) -> Tuple[NamedValues,
                                                   float, bool, Any]:
         ''' input acitons, gain outcomes, and update states. if done, reset.
             return
@@ -98,15 +97,15 @@ class Env(abc.ABC):
         return transition, reward, done, info
 
     @abc.abstractmethod
-    def init(self, *args, **kargs) -> _NamedValues:
+    def init(self, *args, **kargs) -> NamedValues:
         '''
         initialiize the state dict
         '''
         raise NotImplementedError
 
     @abc.abstractmethod    
-    def transit(self, states_and_actions: _NamedValues
-                ) -> Tuple[_NamedValues, Any]:
+    def transit(self, states_and_actions: NamedValues
+                ) -> Tuple[NamedValues, Any]:
         '''
         return:
         - next states and outcomes (dict)
@@ -115,15 +114,15 @@ class Env(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def done(self, transition: _NamedValues, info: Any) -> bool:
+    def done(self, transition: NamedValues, info: Any) -> bool:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def reward(self, transition: _NamedValues) -> float:
+    def reward(self, transition: NamedValues) -> float:
         raise NotImplementedError
     
     @abc.abstractmethod
-    def random_action(self) -> _NamedValues:
+    def random_action(self) -> NamedValues:
         raise NotImplementedError
 
     @property
@@ -153,6 +152,11 @@ class Env(abc.ABC):
     
     @property
     @final
+    def names_o(self):
+        return self.__names_o
+
+    @property
+    @final
     def names_inputs(self):
         return self.__names_inputs
 
@@ -160,11 +164,14 @@ class Env(abc.ABC):
     @final
     def names_outputs(self):
         return self.__names_outputs
-    
-    @property
+
+    @property    
+    def names_all(self):
+        return self.__names_all
+
     @final
-    def names_o(self):
-        return self.__names_o
+    def has_name(self, name: str):
+        return name in self.__vtypes
 
     @property
     @final

@@ -4,27 +4,20 @@ import numpy as np
 import torch
 
 import utils
+from utils.typings import ParentDict, NamedArrays
+
 from .buffer import Buffer
 from core.env import Env
 
 
-ParentDict = Dict[str, Set[str]]
-
-
-def discover(buffer: Buffer, env: Env, thres=0.05, log=True
+def discover(data: NamedArrays, env: Env, thres=0.05, log=True
              ) -> ParentDict:
     pa_dic: ParentDict = {
         key: set() for key in env.names_outputs}
 
-    data = buffer.read_all()
-    data = {k: utils.TensorOperator.t2a(v, float)
-            for k, v in data.items()}
-
     for i in env.names_inputs:
         for j in env.names_outputs:
-            p: float = utils.fcit_test(
-                data[i].reshape(len(buffer), -1),
-                data[j].reshape(len(buffer), -1))  # type: ignore
+            p: float = utils.fcit_test(data[i], data[j])  # type: ignore
             if p <= thres or np.isnan(p):
                 pa_dic[j].add(i)  # biuld edge
             if log:
@@ -38,16 +31,14 @@ def discover(buffer: Buffer, env: Env, thres=0.05, log=True
     return pa_dic  # type: ignore
 
 
-def update(old: ParentDict, buffer: Buffer,
+def update(old: ParentDict, data: NamedArrays,
           *edges: Tuple[str, str], thres=0.05, inplace=True,
            showinfo=True):
+
     if inplace:
         new: ParentDict = old
     else:
         new = {k: v.copy() for k, v in old.items()}
-    
-    data = buffer.read_all()
-    data = {k: v.numpy().astype(float) for k, v in data.items()}
     
     for i, j in edges:
         try:
@@ -55,9 +46,7 @@ def update(old: ParentDict, buffer: Buffer,
         except ValueError:
             pass
 
-        p: float = utils.fcit_test(
-            data[i].reshape(len(buffer), -1),
-            data[j].reshape(len(buffer), -1))  # type: ignore
+        p: float = utils.fcit_test(data[i], data[j])  # type: ignore
         if p <= thres or np.isnan(p):
             new[j].add(i)  # biuld edge
         if showinfo:

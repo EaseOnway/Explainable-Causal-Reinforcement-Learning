@@ -12,9 +12,7 @@ from ..base import BaseNN
 from .encoder import VariableEncoder
 from .inferrer import StateKey, DistributionInferrer
 from learning.config import Config
-
-
-_ParentDic = Dict[str, Tuple[str, ...]]
+from utils.typings import NamedTensors, SortedParentDict
 
 
 class CausalNet(BaseNN):
@@ -29,9 +27,9 @@ class CausalNet(BaseNN):
 
         dims = config.dims
 
-        self.parent_dic: _ParentDic = {}
-        self.parent_dic_s: _ParentDic = {}
-        self.parent_dic_a: _ParentDic = {}
+        self.parent_dic: SortedParentDict = {}
+        self.parent_dic_s: SortedParentDict = {}
+        self.parent_dic_a: SortedParentDict = {}
 
         self.encoder = VariableEncoder(config)
         self.inferrers: Dict[str, DistributionInferrer] = {}
@@ -85,12 +83,12 @@ class CausalNet(BaseNN):
         logprobs = predicted.logprobs(labels)
         return {k: torch.mean(v) for k, v in logprobs.items()}
 
-    def loglikelihood(self, lldic: Dict[str, torch.Tensor]):
+    def loglikelihood(self, lldic: NamedTensors):
         ls = list(lldic.values())
         return torch.sum(torch.stack(ls))
 
     def get_attn_dic(self):
-        out: Dict[str, torch.Tensor] = {}
+        out: NamedTensors = {}
         for var in self.env.names_outputs:
             attn = self.inferrers[var].attn  # nstates * batch
             attn = attn.detach().cpu().numpy()

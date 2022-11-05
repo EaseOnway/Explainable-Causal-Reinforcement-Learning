@@ -3,6 +3,7 @@ import numpy as np
 import abc
 import torch
 from utils import Shaping
+from utils.typings import Shape, ShapeLike
 import core.ptype as ptype
 import enum
 
@@ -43,7 +44,7 @@ class VType(abc.ABC):
 
     
     @abc.abstractproperty
-    def shape(self) -> Shaping.Shape:
+    def shape(self) -> Shape:
         """the shape of the **raw data** of the variable. Used by the
         environment and the buffer."""
         raise NotImplementedError
@@ -103,7 +104,7 @@ class VType(abc.ABC):
 class ContinuousBase(VType):
     """Base Class for Continuous Variables"""
 
-    def __init__(self, shape: Shaping.ShapeLike):
+    def __init__(self, shape: ShapeLike):
         super().__init__()
         self.__shape = Shaping.as_shape(shape)
         self.__size = Shaping.get_size(shape)
@@ -134,7 +135,7 @@ class ContinuousBase(VType):
 class ContinuousNormal(ContinuousBase):
     """Continuous Variables with normal (gaussian) posterior"""
 
-    def __init__(self, shape: Shaping.ShapeLike = (),
+    def __init__(self, shape: ShapeLike = (),
                  scale: Optional[float] = 1.):
         """
         Args:

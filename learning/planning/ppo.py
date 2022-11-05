@@ -11,8 +11,13 @@ from ..buffer import Buffer
 from ..config import Config
 from ..base import Configured, BaseNN
 from ..data import Batch, Transitions, Distributions
-from core.env import _NamedValues
+from utils.typings import NamedValues
+from core import DType
 import utils as u
+
+
+_ADV = "_ADV_"  # key for advantage
+_TD = "_TD_"  # key for td-residual
 
 
 class VariableConcat(BaseNN):
@@ -151,7 +156,7 @@ class PPO(Configured):
 
     def actor_loss(self, data: Transitions):
         with torch.no_grad():
-            adv = self.critic.td_residual(data)
+            adv = data[_ADV]
             old_policy = self.__old_actor.forward(data)
             actions = data.select(self.env.names_a).kapply(self.raw2label)
         
@@ -171,12 +176,34 @@ class PPO(Configured):
         td = self.critic.td_residual(data)
         return torch.mean(torch.square(td))
     
-    def act(self, states: _NamedValues):
+    def act(self, states: NamedValues):
         s =  Batch.from_sample(self.as_raws(states))
         pi = self.actor.forward(s)
         a = pi.sample().kapply(self.label2raw)
         a = self.as_numpy(a)
         return a
+    
+    def __compute_td_gae(self, buffer: Buffer):
+        with torch.no_grad():
+            transitions = buffer.transitions[:]
+            td = self.critic.td_residual(transitions)
+            dones = transitions.dones
+            n = transitions.n
+            w = self.args.gamma * self.args.gae_lambda
+            if w > 0:            
+                gae = torch.empty(n, dtype=DType.Numeric.torch)
+                temp = 0
+                for i in range(n-1, -1, -1):
+                    if dones[i]:
+                        temp = td[i]
+                    else:
+                        temp = w * temp + td[i]
+                    gae[i] = temp
+            else:
+                gae = td
+
+            buffer[_TD] = td
+            buffer[_ADV] = gae
 
     def optimize(self, buffer: Buffer):
         batchsize = self.args.optim_args.batchsize
@@ -192,6 +219,7 @@ class PPO(Configured):
                                   self.opt_c)
         
         self.__old_actor_update()
+        self.__compute_td_gae(buffer)
 
         for i in range(self.args.n_epoch_actor):
             for data in buffer.epoch(batchsize):
@@ -200,6 +228,9 @@ class PPO(Configured):
                 loss.backward()
                 self.F.optim_step(self.args.optim_args, self.actor,
                                   self.opt_a)
+
+        del buffer[_ADV]
+        del buffer[_TD]
 
         return loss_log
     

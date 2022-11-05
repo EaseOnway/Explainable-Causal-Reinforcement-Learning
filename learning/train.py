@@ -7,13 +7,14 @@ import time
 import tensorboardX
 from .data import Batch
 from .buffer import Buffer
-from .causal_discovery import discover, update, ParentDict
+from .causal_discovery import discover, update
 from .causal_model import CausalNet
 from .config import Config
 from .base import Configured
 from .planning import PPO
 from core import Env
 from utils import Log
+from utils.typings import ParentDict, NamedArrays
 import utils
 
 
@@ -95,7 +96,7 @@ class Train(Configured):
 
     @final
     def fit_batch(self, size: int, eval=False):
-        data = self.outer_buffer.batch_random(size)
+        data = self.outer_buffer.sample_batch(size)
         self.causnet.train(not eval)
         lls = self.causnet.get_loglikeli_dic(data)
         ll = self.causnet.loglikelihood(lls)
@@ -169,11 +170,17 @@ class Train(Configured):
     def __eval(self):
         return self.fit(self.causal_args.n_iter_eval, eval=True)
     
+    def __get_data_for_causal_discovery(self) -> NamedArrays:
+       temp = self.outer_buffer.tensors[:]
+       temp = {k: self.raw2input(k, v).numpy() for k, v in temp.items()}
+       return temp
+    
     def warmup(self, n_samples, n_iter, printlog=True):
         self.outer_buffer.clear()
         log_collect = self.collect_warmup(n_samples)
         if not self.ablations.graph_fixed:
-            self.causal_graph = discover(self.outer_buffer, self.env,
+            data = self.__get_data_for_causal_discovery()
+            self.causal_graph = discover(data, self.env,
                                          self.causal_args.pvalue_thres,
                                          printlog)
         log_fit = self.fit(n_iter)
