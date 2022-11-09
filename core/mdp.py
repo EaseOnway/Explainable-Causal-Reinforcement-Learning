@@ -15,11 +15,11 @@ class CausalMdp(Env):
         self.__undefined = set(self.names_outputs)
         for name in self.names_inputs:
             self.__scm.add(ExoVar(name, self.var(name)))
-    
+
     @property
     def scm(self):
         return self.__scm
-        
+
     def define(self, name: str, parents: Sequence[str], eq: Callable):
         if name in self.names_s:
             name = self.name_next(name)
@@ -29,9 +29,9 @@ class CausalMdp(Env):
         self.__scm.add(EndoVar([self.__scm[pa] for pa in parents], eq, name=name))
         self.__undefined.remove(name)
 
-    def transit(self, states_and_actions):
+    def transit(self, actions):
         assert len(self.__undefined) == 0, "undefined variables!"
 
-        self.__scm.assign(**states_and_actions)
+        self.__scm.assign(**actions, **self.current_state)
         outs = {name: self.__scm[name].value for name in self.names_outputs}
         return outs, self.__scm.valuedic()

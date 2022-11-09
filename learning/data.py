@@ -64,27 +64,56 @@ class Batch():
 
 
 class Transitions(Batch):
-    def __init__(self, data: Dict[str, Tensor], rewards: Tensor, dones: Tensor):
+    RUNNING = 0
+    DONE = 1
+    TRUNCATED = 2
+
+    def __init__(self, data: Dict[str, Tensor], rewards: Tensor, code: Tensor):
         n = rewards.shape[0]
-        if dones.shape != (n,):
+        if code.shape != (n,):
             raise ValueError("wrong shape")
         super().__init__(n, data)
 
         self.rewards = rewards
-        if dones.dtype != torch.bool:
-            dones = dones.bool()
-        self.dones = dones
+        if code.dtype != torch.int8:
+            code = code.to(torch.int8)
+        self.code = code
+    
+    @property
+    def running(self):
+        return self.code == Transitions.RUNNING
+    
+    @property
+    def done(self):
+        return self.code == Transitions.DONE
+    
+    @property
+    def truncated(self):
+        return self.code == Transitions.TRUNCATED
+    
+    @property
+    def terminated(self):
+        return self.code != Transitions.RUNNING
 
     @staticmethod
-    def from_sample(data: Dict[str, Tensor], reward: float, done: bool):
+    def from_sample(data: Dict[str, Tensor], reward: float, code: int):
         data_ = {k: v.reshape(1, *v.shape) for k, v in data.items()}
         reward_ = torch.tensor([reward], dtype=torch.float)
-        done_ = torch.tensor([done], dtype=torch.bool) 
-        return Transitions(data_, reward_, done_)
+        code_ = torch.tensor([code], dtype=torch.int8) 
+        return Transitions(data_, reward_, code_)
+    
+    @staticmethod
+    def get_code(done: bool, truncated: bool):
+        if done:
+            return Transitions.DONE
+        elif truncated:
+            return Transitions.TRUNCATED
+        else:
+            return Transitions.RUNNING
     
     def to(self, device: torch.device):
         return Transitions({k: v.to(device) for k, v in self.data.items()},
-                           self.rewards.to(device), self.dones.to(device))
+                           self.rewards.to(device), self.code.to(device))
 
 
 class Distributions:

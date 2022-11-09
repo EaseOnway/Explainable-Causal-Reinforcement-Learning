@@ -146,5 +146,5 @@ class BaseNN(nn.Module, Configured):
             if p.ndim < 2:
                 nn.init.normal_(p)
             else:
-                nn.init.xavier_normal_(p)
+                nn.init.orthogonal_(p)
 

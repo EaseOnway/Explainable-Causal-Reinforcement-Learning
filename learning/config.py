@@ -73,13 +73,13 @@ class NetDims(_BaseConfig):
     def __init__(self):
         super().__init__()
 
-        self.action_encoder_hidden: int = 8
-        self.state_encoder_hidden: int = 8
-        self.action_encoding: int = 8
+        self.action_encoder_hidden: int = 16
+        self.state_encoder_hidden: int = 16
+        self.action_encoding: int = 16
         self.state_encoding: int = 16
-        self.inferrer_value: int = 16
+        self.inferrer_value: int = 32
         self.inferrer_key: int = 16
-        self.action_aggregator_hidden: int = 16
+        self.action_aggregator_hidden: int = 32
         self.inferrer_feed_forward: int = 32
         self.decoder_hidden: int = 32
         self.actor_critic_hidden: int = 64
@@ -99,7 +99,7 @@ class OptimArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
 
-        self.lr = 0.01
+        self.lr = 1e-3
         self.algorithm = "Adam"
         self.alg_args: Dict[str, Any] = {}
         self.batchsize = 128
@@ -110,7 +110,6 @@ class PPOArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
 
-        self.gamma = 0.98
         self.gae_lambda = 0.9
         self.kl_penalty = 0.1
         self.entropy_penalty = 0.01
@@ -128,11 +127,24 @@ class CausalArgs(_BaseConfig):
         self.n_iter_eval = 2
         self.optim_args = OptimArgs()
         self.prior = 0.25
-        self.pvalue_thres = 0.05
+        self.pthres_independent = 0.05
+        self.pthres_likeliratio = 0.1
         self.conf_decay = 0.1
         self.adaptive_thres = True
         self.n_sample_warmup = 2000
         self.n_iter_warmup = 50
+
+
+class RLArgs(_BaseConfig):
+    def __init__(self):
+        super().__init__()
+        
+        self.discount = 0.95  # gamma
+        self.model_batchsize = 128
+        self.model_ratio = 0.8
+        self.max_model_tr_len = 10
+        self.use_true_init = False
+
 
 class Config(_BaseConfig):
     def __init__(self, env: Env):
@@ -141,5 +153,6 @@ class Config(_BaseConfig):
         self.ablations = Ablations()
         self.causal_args = CausalArgs()
         self.ppo_args = PPOArgs()
+        self.rl_args = RLArgs()
         self.env = env
         self.device = torch.device('cpu')

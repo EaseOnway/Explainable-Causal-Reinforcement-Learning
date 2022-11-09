@@ -151,7 +151,62 @@ class ContinuousNormal(ContinuousBase):
     @property
     def ptype(self) -> ptype.PType:
         return self.__ptype
+    
+class ContinuousBeta(ContinuousBase):
+    """Continuous Variables with beta posterior"""
 
+    def __init__(self, shape: ShapeLike = (),
+                 low: Optional[Any] = None,
+                 high: Optional[Any] = None):
+        """
+        Args:
+            shape (ShapeLike, optional): the shape of the variable. Defaults to
+                (), i.e. scalar.
+            scale (None or float, optional): the standard deviance of the
+                normal distribution. Defaults to 1. If it is None, the scale
+                is inferred by the neural networks.
+        """
+        super().__init__(shape)
+
+        if low is None:
+            self.__l = None
+        else:
+            self.__l = torch.tensor(low, dtype=DType.Numeric.torch)
+        
+        if high is None:
+            self.__h = None
+        else:
+            self.__h = torch.tensor(high, dtype=DType.Numeric.torch)
+            
+        self.__ptype = ptype.Beta(self.size)
+
+    @property
+    def ptype(self) -> ptype.PType:
+        return self.__ptype
+
+    def __get_low_high(self, device: torch.device):
+        if self.__l is not None and self.__l.device != device:
+            self.__l = self.__l.to(device)
+        if self.__h is not None and self.__h.device != device:
+            self.__h = self.__h.to(device)
+
+        l = 0. if self.__l is None else self.__l
+        h = 1. if self.__h is None else self.__h
+        return l, h
+
+    def raw2input(self, batch: torch.Tensor):
+                return batch.view(batch.shape[0], -1)
+    
+    def raw2label(self, batch: torch.Tensor):
+        x = batch.view(batch.shape[0], -1)
+        l, h = self.__get_low_high(batch.device)
+        return (x - l) / (h - l)
+    
+    def label2raw(self, batch: torch.Tensor):
+        l, h = self.__get_low_high(batch.device)
+        x =  l + batch * (h - l)
+        x = x.view(x.shape[0], *self.shape)
+        return x
 
 class Categorical(VType):
     """Class for Categorical Variables"""
@@ -193,7 +248,7 @@ class Categorical(VType):
         return self.__ptype
 
 
-class Boolean(VType):
+class Boolean(Categorical):
     """Class for Categorical Variables"""
 
     def __init__(self):
@@ -202,30 +257,21 @@ class Boolean(VType):
             k (int): the number of categories
         """        
 
-        super().__init__()
-        self.__ptype = ptype.Categorical(2)
+        super().__init__(2)
 
     @property
     def shape(self):
         return ()
-
-    @property
-    def size(self) -> int:
-        return 1
     
     @property
     def dtype(self):
         return DType.Bool
-
+    
     def raw2input(self, batch: torch.Tensor):
-        return batch.to(DType.Numeric.torch)
+        return super().raw2input(batch.to(DType.Index.torch))
     
     def raw2label(self, batch: torch.Tensor):
         return batch.to(DType.Index.torch)
     
     def label2raw(self, batch: torch.Tensor):
         return batch.bool()
-    
-    @property
-    def ptype(self) -> ptype.PType:
-        return self.__ptype

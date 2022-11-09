@@ -61,8 +61,8 @@ class Env(abc.ABC):
         self.__state_id_map.update({k: i for i, k in enumerate(self.__names_next_s)})
         self.__outcome_id_map = {k: i for i, k in enumerate(self.__names_o)}
         self.__vtypes: Dict[str, vtype.VType] = info.vtypes
-    
-        self.reset()
+
+        self.__current_state: NamedValues
     
     def reset(self, *args, **kargs):
         ''' initialiize the current state
@@ -70,6 +70,14 @@ class Env(abc.ABC):
     
         self.__current_state = self.init(*args, **kargs)
     
+    @property
+    @final
+    def current_state(self):
+        try:
+            return self.__current_state
+        except AttributeError:
+            self.reset()
+            return self.__current_state
 
     def step(self, action: NamedValues) -> Tuple[NamedValues,
                                                   float, bool, Any]:
@@ -81,11 +89,15 @@ class Env(abc.ABC):
             - other information (Any)
         '''
 
-        transition = self.__current_state.copy()
+        transition: NamedValues = action.copy()
+        transition.update(self.current_state)
         transition.update(action)
-        out, info = self.transit(transition)
+
+        out, info = self.transit(action)
+
         transition.update(out)
-        done = self.done(transition, info)
+        
+        done = self.done(transition)
         reward = self.reward(transition)
         
         if not done:
@@ -95,6 +107,53 @@ class Env(abc.ABC):
             self.reset()
 
         return transition, reward, done, info
+    
+    def demo(self):
+        self.reset()
+
+        episode = 0
+        i = 0
+        while True:
+            length = input()
+
+            if length == 'q':
+                break
+
+            try:
+                length = int(length)
+            except ValueError:
+                length = 1
+
+            for _ in range(length):
+                a = self.random_action()
+                tr, r, done, info = self.step(a)
+
+                print(f"episode {episode}, step {i}:")
+                print(f"| state:")
+                for name in self.names_s:
+                    print(f"| | {name} = {tr[name]}")
+                print(f"| action:")
+                for name in self.names_a:
+                    print(f"| | {name} = {tr[name]}")
+                print(f"| next state:")
+                for name in self.names_next_s:
+                    print(f"| | {name} = {tr[name]}")
+                print(f"| outcome:")
+                for name in self.names_o:
+                    print(f"| | {name} = {tr[name]}")
+                print(f"| reward = {r}")
+                if info is not None:
+                    print(f"| info: {info}")
+
+                if done:
+                    print(f"episode {episode} terminated.")
+                    episode += 1
+                    i = 0
+                else:
+                    i += 1
+        
+        self.reset()
+
 
     @abc.abstractmethod
     def init(self, *args, **kargs) -> NamedValues:
@@ -104,8 +163,7 @@ class Env(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod    
-    def transit(self, states_and_actions: NamedValues
-                ) -> Tuple[NamedValues, Any]:
+    def transit(self, actions: NamedValues) -> Tuple[NamedValues, Any]:
         '''
         return:
         - next states and outcomes (dict)
@@ -114,7 +172,7 @@ class Env(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def done(self, transition: NamedValues, info: Any) -> bool:
+    def done(self, transition: NamedValues) -> bool:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -124,11 +182,6 @@ class Env(abc.ABC):
     @abc.abstractmethod
     def random_action(self) -> NamedValues:
         raise NotImplementedError
-
-    @property
-    @final
-    def current_state(self):
-        return self.__current_state
 
     @property
     @final

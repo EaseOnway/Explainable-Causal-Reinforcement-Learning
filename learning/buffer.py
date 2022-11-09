@@ -22,7 +22,7 @@ class Buffer(Configured):
         self.__size = 0
         self.__data: Dict[str, Tensor] = {}
         self.__rewards = torch.empty(self.__cache_size, dtype=DType.Numeric.torch)
-        self.__dones = torch.empty(self.__cache_size, dtype=DType.Bool.torch)
+        self.__codes = torch.empty(self.__cache_size, dtype=torch.int8)
         self.__tensors = _TensorGetter(self)
         self.__arrays = _ArrayGetter(self)
         self.__transitions = _TransitionGetter(self)
@@ -39,8 +39,8 @@ class Buffer(Configured):
         return self.__rewards[self.__beg: self.__beg + self.__size]
     
     @property
-    def dones(self):
-        return self.__dones[self.__beg: self.__beg + self.__size]
+    def codes(self):
+        return self.__codes[self.__beg: self.__beg + self.__size]
 
     def __declear(self, name: str, shape: Shaping.Shape, dtype: torch.dtype):
         if name in self.__data:
@@ -111,27 +111,29 @@ class Buffer(Configured):
     def refresh(self):
         beg, size = self.__beg, self.__size
         to_refresh = tuple(self.__data.values()) + \
-            (self.__rewards, self.__dones)
+            (self.__rewards, self.__codes)
         for array in to_refresh:
             array[0: size] = array[beg: beg + size]
         self.__beg = 0
 
-    def write(self, data: Dict[str, Any], reward: float, done: bool):
+    def write(self, data: Dict[str, Any], reward: float, done: bool, truncated: bool):
         if self.__beg + self.__size >= self.__cache_size:
             self.refresh()
 
         data_ = self.as_raws(data, device='cpu')
 
         i = self.__beg + self.__size
-        for key, array in self.__data.items():
+        for key, tensor in self.__data.items():
             try:
                 value = data_[key]
             except KeyError:
                 raise KeyError(f"'{key}' is missing")
-            array[i] = value
+            tensor[i] = value
         
         self.__rewards[i] = reward
-        self.__dones[i] = done
+
+        code = Transitions.get_code(done, truncated)
+        self.__codes[i] = code
 
         if self.__size == self.__max_size:
             self.__beg += 1
@@ -139,6 +141,34 @@ class Buffer(Configured):
             self.__size += 1
         else:
             assert False
+
+    def append(self, transitions: Transitions):
+        if self.__beg + self.__size + transitions.n >= self.__cache_size:
+            self.refresh()
+
+        if transitions.n > self.max_size:
+            raise NotImplementedError
+
+        i = self.__beg + self.__size
+        j = i + transitions.n
+
+        for key, tensor in self.__data.items():
+            try:
+                value = transitions[key]
+            except KeyError:
+                raise KeyError(f"'{key}' is missing")
+            
+            tensor[i: j] = value.cpu()
+        
+        self.__rewards[i: j] = transitions.rewards.cpu()
+        self.__codes[i: j] = transitions.code.cpu()
+
+        size = j - self.__beg
+        if size > self.__max_size:
+            self.__beg = j - self.__max_size
+            self.__size = self.__max_size
+        else:
+            self.__size = size
 
 
 class _TensorGetter:
@@ -166,11 +196,11 @@ class _TransitionGetter:
     
     def __getitem__(self, index) -> Transitions:
         rewards = self.__buffer.rewards[index].to(self.__device)
-        dones = self.__buffer.dones[index].to(self.__device)
+        codes = self.__buffer.codes[index].to(self.__device)
         data = {k: self.__buffer[k][index].to(self.__device)
                 for k in self.__buffer.keys()}
 
         if rewards.ndim == 0:
-            return Transitions.from_sample(data, float(rewards), bool(dones))        
+            return Transitions.from_sample(data, float(rewards), int(codes))        
         else:
-            return Transitions(data, rewards, dones)
+            return Transitions(data, rewards, codes)

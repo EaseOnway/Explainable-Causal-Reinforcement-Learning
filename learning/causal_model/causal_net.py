@@ -12,7 +12,7 @@ from ..base import BaseNN
 from .encoder import VariableEncoder
 from .inferrer import StateKey, DistributionInferrer
 from learning.config import Config
-from utils.typings import NamedTensors, SortedParentDict
+from utils.typings import NamedTensors, SortedParentDict, NamedArrays, NamedValues
 
 
 class CausalNet(BaseNN):
@@ -93,4 +93,11 @@ class CausalNet(BaseNN):
             attn = self.inferrers[var].attn  # nstates * batch
             attn = attn.detach().cpu().numpy()
             out[var] = attn
+        return out
+    
+    def simulate(self, state_actions: NamedValues):
+        data =  Batch.from_sample(self.as_raws(state_actions))
+        dis = self.forward(data)
+        out = dis.sample().kapply(self.label2raw)
+        out = self.as_numpy(out, drop_batch=True)
         return out

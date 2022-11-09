@@ -54,6 +54,15 @@ class Categorical(PType):
     def __call__(self, weights: Tensor):
         weights = torch.softmax(weights, dim=1) + EPSILON / self.__k
         return D.Categorical(weights)
+    
+class Beta(PType):
+    def __init__(self, dim: int):
+        super().__init__(alpha=dim, beta=dim)
+        
+    def __call__(self, alpha: Tensor, beta: Tensor):
+        a = torch.nn.functional.softplus(alpha) + EPSILON
+        b = torch.nn.functional.softplus(beta) + EPSILON
+        return D.Beta(a, b)
 
 
 class Bernoulli(PType):

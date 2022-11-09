@@ -33,27 +33,28 @@ class MyMdp(CausalMdp):
 
         vs = [-1, 0, 1]
 
-        self.define('d', ['x', 'y'], lambda x, y: np.sqrt(x*x + y*y))
+        self.define('d', ['x', 'y'], lambda x, y: np.abs(x) + np.abs(y))
         self.define('g', ['x', 'y'],
-                    lambda x, y: np.max(np.abs([x, y])) < 0.2)
+                    lambda x, y: np.max(np.abs([x, y])) < 1.0)
     
     def init(self):
-        return {'x': np.random.normal(), 'y': np.random.normal()}
+        x, y = np.random.uniform(1.0, 5.0, 2) * (1 - np.random.randint(0, 2, 2) * 2)
+        return {'x': x, 'y': y}
     
-    def done(self, transition, info) -> bool:
-        x, y, g = u.Collections.select(transition, ['x\'', 'y\'', 'g'])
-        if np.abs(x) > 5 or np.abs(y) > 5 or g == True:
+    def done(self, transition) -> bool:
+        d, g = u.Collections.select(transition, ['d', 'g'])
+        if d > 10 or g:
             return True
         return False
     
     def reward(self, transition) -> float:
-        x, y, g = u.Collections.select(transition, ['x\'', 'y\'', 'g'])
-        if np.abs(x) > 5 or np.abs(y) > 5:
+        d, g = u.Collections.select(transition, ['d', 'g'])
+        if d > 10:
             return -10
         elif g == True:
             return 10
         else:
-            return -1
+            return - d / 10
 
     def random_action(self):
         return {'vx': np.random.normal(), 'vy': np.random.normal()}
@@ -66,24 +67,33 @@ mdp = MyMdp()
 config = cfg.Config(mdp)
 config.causal_args.buffersize = 20000
 config.ppo_args.buffersize = 2000
-config.causal_args.n_sample_warmup = 2000
+config.rl_args.discount = 0.9
+config.rl_args.model_ratio = 0.9
+config.rl_args.max_model_tr_len = 8
+config.causal_args.n_sample_warmup = 1000
+config.causal_args.pthres_independent = 0.1
+config.causal_args.pthres_likeliratio = 0.1
 config.device = torch.device('cuda')
-config.ppo_args.gamma = 0.9
 config.ppo_args.gae_lambda = 0.9
 config.ppo_args.entropy_penalty = 0.01
+config.causal_args.optim_args.lr = 0.001
 config.ppo_args.kl_penalty = 0.1
-config.ablations.graph_fixed = True
-config.causal_args.n_iter_train = 50
-config.causal_args.n_iter_eval = 5
+config.causal_args.n_iter_train = 100
+config.causal_args.n_iter_eval = 8
 config.causal_args.optim_args.batchsize = 512
 config.ppo_args.optim_args.batchsize = 512
-config.ppo_args.n_epoch_actor = 10
-config.ppo_args.n_epoch_critic = 30
+config.ppo_args.n_epoch_actor = 5
+config.ppo_args.n_epoch_critic = 20
+config.ppo_args.optim_args.lr = 0.001
+# config.ablations.graph_fixed = True
+
+
 trainer = learning.Train(config, "test")
-trainer.causal_graph = mdp.scm.parentdic()
+
+# trainer.causal_graph = mdp.scm.parentdic()
 
 
-trainer.run(50, 'verbose')
+trainer.run(100, 'verbose')
 
 
 state = mdp.init()

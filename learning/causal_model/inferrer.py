@@ -44,6 +44,8 @@ class Inferrer(BaseNN):
         self.feed_forward = nn.Sequential(
             nn.Linear(dv, dv, **self.torchargs),
             nn.LeakyReLU(),
+            nn.Linear(dv, dff, **self.torchargs),
+            nn.LeakyReLU(),
             nn.Linear(dv, dff, **self.torchargs)
         )
 

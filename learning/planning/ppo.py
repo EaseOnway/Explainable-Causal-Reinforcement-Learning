@@ -58,6 +58,8 @@ class StateEncoder(VariableConcat):
             nn.Linear(dim, dim, **self.torchargs),
             nn.LeakyReLU(),
             nn.Linear(dim, dim, **self.torchargs),
+            nn.LeakyReLU(),
+            nn.Linear(dim, dim, **self.torchargs),
         )
 
     def forward(self, raw: Batch):
@@ -71,9 +73,11 @@ class Critic(BaseNN):
         super().__init__(config)
 
         self.state_encoder = StateEncoder(config)
+
+        dim = self.dims.actor_critic_hidden
         self.readout = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Linear(self.dims.actor_critic_hidden, 1, **self.torchargs)
+            nn.Linear(dim, 1, **self.torchargs),
         )
 
     def value(self, raw: Batch):
@@ -101,8 +105,8 @@ class Critic(BaseNN):
         v = self.value(transition)
         v_ = self.value(self.shift_states(transition))
         r = transition.rewards
-        done = transition.dones
-        gamma = self.config.ppo_args.gamma
+        done = transition.done
+        gamma = self.config.rl_args.discount
 
         v_ = torch.masked_fill(v_, done, 0.)
 
@@ -187,14 +191,16 @@ class PPO(Configured):
         with torch.no_grad():
             transitions = buffer.transitions[:]
             td = self.critic.td_residual(transitions)
-            dones = transitions.dones
+            terminated = transitions.terminated
             n = transitions.n
-            w = self.args.gamma * self.args.gae_lambda
-            if w > 0:            
+            
+            w = self.config.rl_args.discount * self.args.gae_lambda
+
+            if w > 0:
                 gae = torch.empty(n, dtype=DType.Numeric.torch)
                 temp = 0
                 for i in range(n-1, -1, -1):
-                    if dones[i]:
+                    if terminated[i]:
                         temp = td[i]
                     else:
                         temp = w * temp + td[i]
