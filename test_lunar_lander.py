@@ -5,7 +5,6 @@ import learning.causal_discovery as causal_discovery
 
 import learning
 import numpy as np
-import pandas as pd
 import learning.config as cfg
 import utils as u
 
