@@ -12,19 +12,19 @@ import utils as u
 np.set_printoptions(precision=4)
 
 
-train_env = LunarLander()
+demo_env = LunarLander(True)
 
 
-config = cfg.Config(train_env)
+config = cfg.Config(demo_env)
 config.causal_args.buffersize = 50000
-config.ppo_args.buffersize = 2500
+config.ppo_args.buffersize = 2000
 config.rl_args.discount = 0.995
 config.ppo_args.gae_lambda = 0.98
 config.rl_args.max_model_tr_len = 16
-config.rl_args.model_ratio = 0.8
+config.rl_args.model_ratio = 0.0
 config.causal_args.pthres_independent = 0.1
 config.causal_args.pthres_likeliratio = 0.1
-config.device = torch.device('cuda')
+config.device = torch.device('cpu')
 config.ppo_args.entropy_penalty = 0.01
 config.causal_args.optim_args.lr = 3e-4
 config.ppo_args.kl_penalty = 0.1
@@ -35,10 +35,11 @@ config.ppo_args.optim_args.batchsize = 512
 config.ppo_args.n_epoch_actor = 8
 config.ppo_args.n_epoch_critic = 32
 config.ppo_args.optim_args.lr = 3e-4
-
 # config.ablations.graph_fixed = True
-trainer = learning.Train(config, "test")
 
-trainer.init_run()
-trainer.warmup(2000, 200)
-trainer.iter(300)
+trainer = learning.Train(config, "demo")
+
+# demo
+trainer.load("experiments\\LunarLander\\test\\run-2\\saved_state_dict")
+demo_env = LunarLander(True)
+demo_env.demo(trainer.ppo.act)

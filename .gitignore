@@ -148,8 +148,8 @@ cython_debug/
 *.gv.png
 *.gv.pdf
 
-# tensorboard summaries
-logs/
+# experiments
+experiments/
 
 # config
 *.config.json

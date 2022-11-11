@@ -24,12 +24,7 @@ NEXT = {name: Env.name_next(name) for name in
 
 
 class LunarLander(Env):
-    FUEL_COSTS = {
-        0: 0.,
-        1: 0.03,
-        2: 0.3,
-        3: 0.03
-    }
+    FUEL_COSTS = np.array([0., 0.03, 0.3, 0.03])
 
     def __init__(self, render=False):
         if render:

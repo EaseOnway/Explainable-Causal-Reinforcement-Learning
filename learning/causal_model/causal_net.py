@@ -38,9 +38,7 @@ class CausalNet(BaseNN):
         for name in self.env.names_outputs:
             self.inferrers[name] = DistributionInferrer(self.v(name), config)
             self.add_module(f'{name}_inferrer', self.inferrers[name])
-
-        # init parameters
-        self.init_parameters()
+    
 
     def load_graph(self, parent_dic: Dict[str, Set[str]]):
         self.parent_dic.clear()

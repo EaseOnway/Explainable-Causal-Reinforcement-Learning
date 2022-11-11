@@ -66,33 +66,35 @@ mdp = MyMdp()
 config = cfg.Config(mdp)
 config.causal_args.buffersize = 20000
 config.ppo_args.buffersize = 2000
-config.rl_args.discount = 0.9
-config.rl_args.model_ratio = 0.9
+config.rl_args.discount = 0.98
+config.ppo_args.gae_lambda = 0.94
 config.rl_args.max_model_tr_len = 8
+config.rl_args.model_ratio = 0.9
 config.causal_args.n_sample_warmup = 1000
 config.causal_args.pthres_independent = 0.1
 config.causal_args.pthres_likeliratio = 0.1
 config.device = torch.device('cuda')
-config.ppo_args.gae_lambda = 0.9
 config.ppo_args.entropy_penalty = 0.01
-config.causal_args.optim_args.lr = 0.001
+config.causal_args.optim_args.lr = 3e-4
 config.ppo_args.kl_penalty = 0.1
 config.causal_args.n_iter_train = 100
 config.causal_args.n_iter_eval = 8
 config.causal_args.optim_args.batchsize = 512
 config.ppo_args.optim_args.batchsize = 512
-config.ppo_args.n_epoch_actor = 5
-config.ppo_args.n_epoch_critic = 20
-config.ppo_args.optim_args.lr = 0.001
+config.ppo_args.n_epoch_actor = 8
+config.ppo_args.n_epoch_critic = 32
+config.ppo_args.optim_args.lr = 3e-4
 # config.ablations.graph_fixed = True
 
 
-trainer = learning.Train(config, "test")
+trainer = learning.Train(config, "test", 'verbose')
 
 # trainer.causal_graph = mdp.scm.parentdic()
 
 
-trainer.run(100, 'verbose')
+trainer.init_run()
+trainer.warmup(2000, 100)
+trainer.iter(100)
 
 
 state = mdp.init()

@@ -197,7 +197,7 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
 
     # Compute the p-value (one-tailed t-test
     # that mean of mse ratios equals 1).
-    t, p_value = ttest_1samp(d0_stats / d1_stats, 1)
+    t, p_value = ttest_1samp((d0_stats + 1e-10) / (d1_stats + 1e-10), 1)
     if t < 0:
         p_value = 1 - p_value / 2
     else:

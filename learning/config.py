@@ -121,7 +121,6 @@ class PPOArgs(_BaseConfig):
 class CausalArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
-
         self.buffersize = 10000
         self.n_iter_train = 10
         self.n_iter_eval = 2
@@ -131,8 +130,6 @@ class CausalArgs(_BaseConfig):
         self.pthres_likeliratio = 0.1
         self.conf_decay = 0.1
         self.adaptive_thres = True
-        self.n_sample_warmup = 2000
-        self.n_iter_warmup = 50
 
 
 class RLArgs(_BaseConfig):
@@ -143,7 +140,6 @@ class RLArgs(_BaseConfig):
         self.model_batchsize = 128
         self.model_ratio = 0.8
         self.max_model_tr_len = 10
-        self.use_true_init = False
 
 
 class Config(_BaseConfig):

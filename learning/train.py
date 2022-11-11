@@ -2,9 +2,9 @@ import os
 from typing import Any, Callable, Dict, List, Literal, Optional, final, Tuple
 import numpy as np
 import torch
-import time
 from scipy.stats import chi2
-import json
+import pickle
+
 
 import tensorboardX
 from .data import Batch, Transitions
@@ -24,14 +24,22 @@ _LL = 'loglikelihood'
 _LOSS = 'NLL loss'
 _DONE = 'done'
 _REWARD = 'reward'
-_LOG_ROOT = './logs/'
+_EXP_ROOT = './experiments/'
+_CAUSAL_GRAPH = 'causal.graph'
+_PPO_ACTOR = 'ppo.actor'
+_PPO_CRITIC = 'ppo.critic'
+_CAUSAL_NET = 'causal.net'
+_SAVED_STATE_DICT = 'saved_state_dict'
+_SAVED_CONFIG = 'config.txt'
 _REAL = 'real'
 _MODEL = 'model'
+_RETURN = 'return'
 
 
 class Train(Configured):
 
-    def __init__(self, config: Config, name: str):
+    def __init__(self, config: Config, name: str,
+                 showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):
         super().__init__(config)
         print("Using following configuration:")
         print(self.config)
@@ -41,14 +49,47 @@ class Train(Configured):
         self.rl_args = self.config.rl_args
 
         self.causnet = CausalNet(config)
+        self.ppo = PPO(config)
+
         self.opt = self.F.get_optmizer(self.causal_args.optim_args, self.causnet)
         self.outer_buffer = Buffer(config, self.causal_args.buffersize)
         self.inner_buffer = Buffer(config, config.ppo_args.buffersize)
-        self.causal_graph = self.init_causal_graph()
-        self.ppo = PPO(config)
+        
+        self.name = name
+        self.dir = _EXP_ROOT + '/' + str(self.env) + '/' + self.name + '/'
 
-        self.__name = name
+        self.show_loss = (showinfo is not None)
+        self.show_detail = (showinfo == 'verbose' or showinfo == 'plot')
+        self.show_plot = (showinfo == 'plot')
+
+        self.__n_sample: int
+        self.__episodic_return: float
+        self.__run_dir: str
+        self.__writer: tensorboardX.SummaryWriter
+        self.__best_log_probs: Dict[str, float]
     
+    @property
+    @final
+    def causal_graph(self):
+        return self.__causal_graph
+
+    @causal_graph.setter
+    @final
+    def causal_graph(self, graph: ParentDict):
+        self.__causal_graph = graph
+        self.causnet.load_graph(self.__causal_graph)
+    
+    def state_dict(self):
+        return {_PPO_ACTOR: self.ppo.actor.state_dict(),
+                _PPO_CRITIC: self.ppo.critic.state_dict(),
+                _CAUSAL_NET: self.causnet.state_dict(),
+                _CAUSAL_GRAPH: self.__causal_graph}
+    
+    def load_state_dict(self, dic: Dict[str, Any]):
+        self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
+        self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
+        self.causnet.load_state_dict(dic[_CAUSAL_NET])
+        self.causal_graph = dic[_CAUSAL_GRAPH]
 
     def collect_warmup(self, n: int):
         log = Log()
@@ -56,10 +97,17 @@ class Train(Configured):
             a = self.env.random_action()
             tran, reward, done, info = self.env.step(a)
             self.outer_buffer.write(tran, reward, done, False)
+            
             log[_REWARD] = reward
             log[_DONE] = done
+
+            self.__episodic_return += reward
+            if done:
+                log[_RETURN] = self.__episodic_return
+                self.__episodic_return = 0.
+
         return log
-    
+
     def collect_online(self):
         buffer = self.inner_buffer
         n_model = int(self.ppo_args.buffersize * self.rl_args.model_ratio)
@@ -74,7 +122,13 @@ class Train(Configured):
             truncated = (i == n_real - 1)
             buffer.write(tran, reward, done, truncated)
             self.outer_buffer.write(tran, reward, done, truncated)
+            
             log[_REAL, _REWARD] = reward
+
+            self.__episodic_return += reward
+            if done:
+                log[_RETURN] = self.__episodic_return
+                self.__episodic_return = 0.
 
         env_m = CausalModel(self.causnet, self.inner_buffer,
                             self.rl_args.model_batchsize)
@@ -113,22 +167,13 @@ class Train(Configured):
         assert buffer.max_size == len(buffer)
         return log, n_real
 
-    def init_causal_graph(self):
-        parent_dic = {j: {i for i in self.env.names_inputs
-                          if utils.Random.event(self.causal_args.prior)}
-                      for j in self.env.names_outputs}
-        return parent_dic
-
-    @property
-    @final
-    def causal_graph(self):
-        return self.__causal_graph
-
-    @causal_graph.setter
-    @final
-    def causal_graph(self, graph: ParentDict):
-        self.__causal_graph = graph
-        self.causnet.load_graph(self.__causal_graph)
+    def init_params(self):
+        self.ppo.actor.init_parameters()
+        self.ppo.critic.init_parameters()
+        self.causnet.init_parameters()
+        self.causal_graph = {j: {i for i in self.env.names_inputs
+                                 if utils.Random.event(self.causal_args.prior)}
+                             for j in self.env.names_outputs}
 
     @final
     def plot_causal_graph(self, format='png'):
@@ -177,29 +222,27 @@ class Train(Configured):
     
     @final
     def planning(self):
-        '''
-        ppo
-        '''
-    
         loss = self.ppo.optimize(self.inner_buffer)
+        self.__writer.add_scalar('actor loss', loss['actor'].mean, self.__n_sample)
+        self.__writer.add_scalar('critic loss', loss['critic'].mean, self.__n_sample)
         return loss
+        
+    def load(self, path: Optional[str] = None):
+        path = path or self.__run_dir + _SAVED_STATE_DICT
+        self.load_state_dict(torch.load(path))
 
-    def save_causal_graph(self, path: str):
-        with open(path, 'w') as f:
-            json.dump(self.__causal_graph, f)
-    
-    def load_causal_graph(self, path: str):
-        with open(path, 'r') as f:
-            causal_graph = json.load(f)
-            self.causal_graph = causal_graph
+    def save(self, path: Optional[str] = None):
+        path = path or self.__run_dir + _SAVED_STATE_DICT
+        torch.save(self.state_dict(), path)
 
-    def update_causal_graph(self, eval_log: Log, best_log_probs: Dict[str, float], 
-                            showinfo=True):
+    def __update_causal_graph(self, eval_log: Log,
+                              best_log_probs: Dict[str, float], 
+                              showinfo=True):
 
         # n = len(self.outer_buffer)
 
         to_check: List[str] = []
-        n = np.sqrt(self.causal_args.optim_args.batchsize)
+        n = np.log2(self.causal_args.optim_args.batchsize)
 
         for name in self.env.names_outputs:
             eval_log_prob = eval_log[_LL, name].mean
@@ -237,121 +280,150 @@ class Train(Configured):
             self.causnet.load_graph(self.__causal_graph)
 
     def __eval(self):
-        return self.fit(self.causal_args.n_iter_eval, eval=True)
+        eval = self.fit(self.causal_args.n_iter_eval, eval=True)
+        writer = self.__writer
+        writer.add_scalar('fitting loss', eval[_LOSS].mean, self.__n_sample)
+        writer.add_scalars(
+            'log-likelihood',
+            {k: eval[_LL, k].mean for k in self.env.names_outputs},
+            self.__n_sample)
+        return eval
     
     def __get_data_for_causal_discovery(self) -> NamedArrays:
        temp = self.outer_buffer.tensors[:]
        temp = {k: self.raw2input(k, v).numpy() for k, v in temp.items()}
        return temp
     
-    def warmup(self, n_samples, n_iter, printlog=True):
+    def __get_run_dir(self, path: Optional[str] = None):
+        if path is None:
+            if not os.path.exists(self.dir):
+                os.makedirs(self.dir)
+            run_names = os.listdir(self.dir)
+            i = 0
+            while True:
+                i += 1
+                run_name = "run-%d" % i
+                if run_name not in run_names:
+                    break
+            path = self.dir + run_name + '/'
+            os.makedirs(path)
+        else:
+            if len(path) == 0:
+                path = './'
+            elif path[-1] != '/' or path[-1] != '\\':
+                path += '/'
+            if not os.path.exists(path):
+                os.makedirs(path)
+        return path
+    
+    def init_run(self, dir: Optional[str] = None, resume=False,
+                 n_sample: Optional[int] = None):
+        path = self.__run_dir = self.__get_run_dir(dir)
+
+        if resume:
+            if n_sample is None:
+                raise ValueError
+            self.load()
+            self.__n_sample = n_sample
+            self.__writer = tensorboardX.SummaryWriter(path, purge_step=n_sample)
+        else:
+            self.__n_sample = 0
+            self.init_params()
+            self.save()
+            self.__writer = tensorboardX.SummaryWriter(path)
+
+        self.__episodic_return = 0.
+        self.__best_log_probs = {name: -np.inf for name in self.env.names_outputs}
+        
+        self.env.reset()
         self.outer_buffer.clear()
-        log_collect = self.collect_warmup(n_samples)
+        self.inner_buffer.clear()
+
+    def warmup(self, n_sample: int, n_iter: int):
+        log_collect = self.collect_warmup(n_sample)
+        self.__n_sample += n_sample
+
+        print(f"warm up: ", end='')
+
+        # causal discovery
         if not self.ablations.graph_fixed:
             data = self.__get_data_for_causal_discovery()
             self.causal_graph = discover(data, self.env,
                                          self.causal_args.pthres_independent,
-                                         printlog)
-        log_fit = self.fit(n_iter)
-        return log_collect, log_fit
+                                         self.show_detail)
+        
+        # fit causal equation
+        fit_log = self.fit(n_iter)
+        eval = self.__eval()
+        self.save()
+        self.__best_log_probs = {k: eval[_LL, k].mean
+                                 for k in self.env.names_outputs}
+
+        # show info
+        if self.show_loss:
+            print('')
+            print(f"fitting loss:\t{eval[_LOSS].mean}")
+        if self.show_detail:
+            for k in self.env.names_outputs:
+                print(f"log-likelihood of '{k}':\t{eval[_LL, k].mean}")
+        if self.show_plot:
+            self.__show_fit_log(fit_log)
+        
+        print('Done.')
     
-    def __make_run_dir(self):
-        path = _LOG_ROOT + '/' + str(self.env) + '/' + self.__name + '/'
-        if not os.path.exists(path):
-            os.makedirs(path)
-        
-        run_names = os.listdir(path)
-        i = 0
-        while True:
-            i += 1
-            run_name = "run-%d" % i
-            if run_name not in run_names:
-                break
-        path = path + run_name + '/'
+        return log_collect, fit_log
 
-        os.makedirs(path)
-        return path
+    def iter(self, n_epoch: int):
         
-    def run(self, n_epoch: int, 
-            showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):
-        
-        path = self.__make_run_dir()
-        writer = tensorboardX.SummaryWriter(path)
-        self.config.to_txt(path + 'config.txt')
+        # perpareation
+        writer = self.__writer
 
-        show_loss = (showinfo is not None)
-        show_log_texts = (showinfo == 'verbose' or showinfo == 'plot')
-        show_plot = (showinfo == 'plot')
-        log_reward = Log()
-
-        # warm up
-        n_sample = self.causal_args.n_sample_warmup
-        log_step, log_fit = self.warmup(n_sample, self.causal_args.n_iter_warmup)
-        reward_real, reward_model = log_step[_REWARD].mean, np.nan
-        best_log_probs = {name: -np.inf for name in self.env.names_outputs}
-        
-        self.save_causal_graph(path + 'causal_graph.json')
-
-        if show_plot:
-            self.__show_fit_log(log_fit)
-        
+        # start iteration
         for i in range(n_epoch):
             # evaluating
             print(f"epoch {i}: ", end='')
-            eval = self.__eval()
-            writer.add_scalar('fitting loss', eval[_LOSS].mean, n_sample)
-            writer.add_scalars(
-                'log-likelihood',
-                {k: eval[_LL, k].mean for k in self.env.names_outputs},
-                n_sample)
-            
-            log_reward['step'] = n_sample
-            log_reward[_REAL] = reward_real
-            log_reward[_MODEL] = reward_model
-
-            # show running statistics
-            if show_loss:
-                print('')
-                print(f"mean reward:\t{reward_real} (real); {reward_model} (model)")
-                print(f"fitting loss:\t{eval[_LOSS].mean}")
-            if show_log_texts:
-                for k in self.env.names_outputs:
-                    print(f"log-likelihood of '{k}':\t{eval[_LL, k].mean}")
 
             # collect new samples
-            log_step, n_sample_ = self.collect_online()
+            log_step, n = self.collect_online()
             reward_real = log_step[_REAL, _REWARD].mean
             reward_model = log_step[_MODEL, _REWARD].mean
+            return_ = log_step[_RETURN].mean
+            writer.add_scalar('reward (real)', reward_real, self.__n_sample)
+            writer.add_scalar('reward (model)', reward_model, self.__n_sample)
+            if not np.isnan(return_):
+                writer.add_scalar('return', return_, self.__n_sample)
+            
+            self.__n_sample = self.__n_sample + n
 
-            n_sample += n_sample_
+            # fit causal equation
+            fit_log = self.fit(self.causal_args.n_iter_train, eval=False)
+
+            # evaluate causal model
+            eval = self.__eval()
             
             # update causal graph
             if not (self.ablations.graph_fixed or self.ablations.graph_offline):
-                self.update_causal_graph(eval, best_log_probs, show_log_texts)
-                self.save_causal_graph(path + 'causal_graph.json')
-
-            # update causal equation
-            fit_log = self.fit(self.causal_args.n_iter_train, eval=False)
+                self.__update_causal_graph(eval, self.__best_log_probs, self.show_detail)
 
             # update policy
             plan_loss = self.planning()
-            writer.add_scalar('actor loss', plan_loss['actor'].mean, n_sample)
-            writer.add_scalar('critic loss', plan_loss['critic'].mean, n_sample)
-            writer.add_scalar('reward (real)', reward_real, n_sample)
-            writer.add_scalar('reward (model)', reward_model, n_sample)
-            
-            if show_loss:
+            writer.add_scalar('actor loss', plan_loss['actor'].mean, self.__n_sample)
+            writer.add_scalar('critic loss', plan_loss['critic'].mean, self.__n_sample)
+
+            # show info
+            if self.show_loss:
+                print('')
+                print(f"mean reward:\t{reward_real} (real); {reward_model} (model)")
                 print(f"actor loss:\t{plan_loss['actor'].mean}")
                 print(f"critic loss:\t{plan_loss['critic'].mean}")
-            
-            # show running statistics
-            if show_plot:
+                print(f"episodic return:\t{return_}")
+                print(f"fitting loss:\t{eval[_LOSS].mean}")
+            if self.show_detail:
+                for k in self.env.names_outputs:
+                    print(f"log-likelihood of '{k}':\t{eval[_LL, k].mean}")
+            if self.show_plot:
                 self.__show_fit_log(fit_log)
                 self.ppo.show_loss(plan_loss)
-
+            
+            self.save()
             print("Done.")
-        
-        if show_plot:
-            log_reward.plot(x = log_reward['step'].data)
-
-        writer.close()

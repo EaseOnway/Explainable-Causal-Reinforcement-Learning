@@ -147,4 +147,3 @@ class BaseNN(nn.Module, Configured):
                 nn.init.normal_(p)
             else:
                 nn.init.orthogonal_(p)
-

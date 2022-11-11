@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Tuple, final
+from typing import Any, Dict, List, Optional, Set, Tuple, final, Callable
 import abc
 from utils import Shaping
 import core.vtype as vtype
@@ -108,7 +108,8 @@ class Env(abc.ABC):
 
         return transition, reward, done, info
     
-    def demo(self):
+    def demo(self, 
+             actor: Optional[Callable[[NamedValues], NamedValues]] = None):
         self.reset()
 
         episode = 0
@@ -125,7 +126,11 @@ class Env(abc.ABC):
                 length = 1
 
             for _ in range(length):
-                a = self.random_action()
+                if actor is None:
+                    a = self.random_action()
+                else:
+                    a = actor(self.current_state)
+                
                 tr, r, done, info = self.step(a)
 
                 print(f"episode {episode}, step {i}:")
@@ -151,7 +156,7 @@ class Env(abc.ABC):
                     i = 0
                 else:
                     i += 1
-        
+
         self.reset()
 
 
