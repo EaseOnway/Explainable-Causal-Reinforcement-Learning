@@ -12,14 +12,14 @@ import utils as u
 np.set_printoptions(precision=4)
 
 
-demo_env = LunarLander(True)
+demo_env = LunarLander(render=True)
 
 
 config = cfg.Config(demo_env)
 config.causal_args.buffersize = 50000
 config.ppo_args.buffersize = 2000
-config.rl_args.discount = 0.995
-config.ppo_args.gae_lambda = 0.98
+config.rl_args.discount = 0.95
+config.ppo_args.gae_lambda = 0.92
 config.rl_args.max_model_tr_len = 16
 config.rl_args.model_ratio = 0.0
 config.causal_args.pthres_independent = 0.1
@@ -40,6 +40,6 @@ config.ppo_args.optim_args.lr = 3e-4
 trainer = learning.Train(config, "demo")
 
 # demo
-trainer.load("experiments\\LunarLander\\test\\run-2\\saved_state_dict")
+trainer.load("experiments\\LunarLander\\test\\run-1\\saved_state_dict")
 demo_env = LunarLander(True)
 demo_env.demo(trainer.ppo.act)

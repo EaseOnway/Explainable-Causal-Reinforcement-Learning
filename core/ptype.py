@@ -7,7 +7,7 @@ import torch
 from torch import Tensor
 
 
-EPSILON = 1e-6
+EPSILON = 1e-5
 
 
 class PType(abc.ABC):
@@ -60,8 +60,8 @@ class Beta(PType):
         super().__init__(alpha=dim, beta=dim)
         
     def __call__(self, alpha: Tensor, beta: Tensor):
-        a = torch.nn.functional.softplus(alpha) + EPSILON
-        b = torch.nn.functional.softplus(beta) + EPSILON
+        a = 1.44 * torch.nn.functional.softplus(alpha) + EPSILON
+        b = 1.44 * torch.nn.functional.softplus(beta) + EPSILON
         return D.Beta(a, b)
 
 

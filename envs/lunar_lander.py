@@ -3,7 +3,9 @@ import gym.envs.box2d.lunar_lander as lunar_lander
 import numpy as np
 
 from core import EnvInfo, Env
-from core import ContinuousNormal, ContinuousBeta, Boolean, Categorical
+from core import ContinuousNormal, ContinuousBeta, \
+    Boolean, Categorical
+from utils.typings import NamedValues
 
 
 X = 'x'
@@ -15,6 +17,8 @@ V_ANG = 'v_angle'
 LEG1 = 'leg_landed_1'
 LEG2 = 'leg_landed_2'
 ENG = 'engine'
+MAINENG = 'main_engine'
+LATENG = 'leteral_engine'
 CRASH = 'crash'
 REST = 'rest'
 FUEL_COST = 'fuel_cost'
@@ -24,13 +28,16 @@ NEXT = {name: Env.name_next(name) for name in
 
 
 class LunarLander(Env):
-    FUEL_COSTS = np.array([0., 0.03, 0.3, 0.03])
+    DISCRETE_FUEL_COSTS = np.array([0., 0.03, 0.3, 0.03])
 
-    def __init__(self, render=False):
+    def __init__(self, continuous=False, render=False):
         if render:
-            self.__core = lunar_lander.LunarLander(render_mode='human')
+            self.__core = lunar_lander.LunarLander(render_mode='human',
+                                                   continuous=continuous)
         else:
-            self.__core = lunar_lander.LunarLander()
+            self.__core = lunar_lander.LunarLander(continuous=continuous)
+        
+        self.__continuous = continuous
 
         env_info = EnvInfo()
         env_info.state(X, ContinuousNormal(scale=None))
@@ -41,7 +48,13 @@ class LunarLander(Env):
         env_info.state(V_ANG, ContinuousNormal(scale=None))
         env_info.state(LEG1, Boolean())
         env_info.state(LEG2, Boolean())
-        env_info.action(ENG, Categorical(4))
+
+        if self.__continuous:
+            env_info.action(MAINENG, ContinuousBeta(low=-1., high=1.))
+            env_info.action(LATENG, ContinuousBeta(low=-1., high=1.))
+        else:
+            env_info.action(ENG, Categorical(4))
+
         env_info.outcome(CRASH, Boolean())
         env_info.outcome(REST, Boolean())
         env_info.outcome(FUEL_COST, ContinuousNormal(scale=None))
@@ -59,15 +72,36 @@ class LunarLander(Env):
     def __outcome_variables(self, x, a):
         return {CRASH: self.__core.game_over or abs(x[0]) >= 1.0,
                 REST: not self.__core.lander.awake,
-                FUEL_COST: self.FUEL_COSTS[a]}
+                FUEL_COST: self.__compute_fuel_cost(a)}
+      
+    def __compute_fuel_cost(self, a) -> float:
+        if self.__continuous:
+            a_main = a[0]
+            a_lat = a[1]
+            m_power = 0.0
+            s_power = 0.0
+            if (a_main > 0.0):
+                m_power = (a_main + 1.0) * 0.5
+                assert 0.5 <= m_power <= 1.0
+            if np.abs(a_lat) > 0.5:
+                s_power = np.abs(a_lat)
+                assert 0.5 <= s_power <= 1.0
+            return 0.3 * m_power + 0.03 * s_power
+        else:
+            return self.DISCRETE_FUEL_COSTS[a]
 
     def init(self, *args, **kargs):
         obs, info = self.__core.reset()
         return self.__state_variables(obs)
     
     def transit(self, actions):
-        a = actions[ENG]
-        observation, reward, terminated, truncated, info = self.__core.step(a)
+        if self.__continuous:
+            a = np.array([actions[MAINENG], actions[LATENG]], dtype=float)
+        else:
+            a = actions[ENG]
+
+        observation, reward, terminated, truncated, info = \
+            self.__core.step(a)  # type: ignore
 
         s = self.__state_variables(observation)
         tran = {self.name_next(k): s[k] for k in s.keys()}
@@ -111,4 +145,8 @@ class LunarLander(Env):
         return reward
 
     def random_action(self):
-        return {ENG: self.__core.action_space.sample()}
+        a = self.__core.action_space.sample()
+        if self.__continuous:
+            return {MAINENG: a[0], LATENG: a[1]}
+        else:
+            return {ENG: a}

@@ -17,15 +17,15 @@ train_env = LunarLander()
 
 config = cfg.Config(train_env)
 config.causal_args.buffersize = 50000
-config.ppo_args.buffersize = 2500
+config.ppo_args.buffersize = 1024
 config.rl_args.discount = 0.995
 config.ppo_args.gae_lambda = 0.98
 config.rl_args.max_model_tr_len = 16
-config.rl_args.model_ratio = 0.8
+config.rl_args.model_ratio = 0.
 config.causal_args.pthres_independent = 0.1
 config.causal_args.pthres_likeliratio = 0.1
 config.device = torch.device('cuda')
-config.ppo_args.entropy_penalty = 0.01
+config.ppo_args.entropy_penalty = 0.02
 config.causal_args.optim_args.lr = 3e-4
 config.ppo_args.kl_penalty = 0.1
 config.causal_args.n_iter_train = 100
@@ -36,7 +36,7 @@ config.ppo_args.n_epoch_actor = 8
 config.ppo_args.n_epoch_critic = 32
 config.ppo_args.optim_args.lr = 3e-4
 
-# config.ablations.graph_fixed = True
+config.ablations.graph_fixed = True
 trainer = learning.Train(config, "test")
 
 trainer.init_run()

@@ -81,3 +81,7 @@ class TensorOperator:
             out[:, i] = arg % shape[i]
             arg = (arg - out[:, i]) / shape[i]
         return out
+
+    @staticmethod
+    def valid(x: torch.Tensor):
+        return not bool(torch.any(torch.isinf(x)) or torch.any(torch.isnan(x)))

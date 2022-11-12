@@ -35,6 +35,8 @@ TORCH_DTYPE_MAP = {
 }
     
 
+EPSILON = 1e-5
+
 
 class VType(abc.ABC):
     """the class describing a variable in the environment. How the
@@ -151,7 +153,8 @@ class ContinuousNormal(ContinuousBase):
     @property
     def ptype(self) -> ptype.PType:
         return self.__ptype
-    
+
+
 class ContinuousBeta(ContinuousBase):
     """Continuous Variables with beta posterior"""
 
@@ -172,12 +175,12 @@ class ContinuousBeta(ContinuousBase):
             self.__l = None
         else:
             self.__l = torch.tensor(low, dtype=DType.Numeric.torch)
-        
+
         if high is None:
             self.__h = None
         else:
             self.__h = torch.tensor(high, dtype=DType.Numeric.torch)
-            
+
         self.__ptype = ptype.Beta(self.size)
 
     @property
@@ -198,15 +201,23 @@ class ContinuousBeta(ContinuousBase):
                 return batch.view(batch.shape[0], -1)
     
     def raw2label(self, batch: torch.Tensor):
-        x = batch.view(batch.shape[0], -1)
         l, h = self.__get_low_high(batch.device)
-        return (x - l) / (h - l)
+        x = batch.view(batch.shape[0], -1)
+        x = (x - l) / (h - l)
+        x[x == 0.] += EPSILON
+        x[x == 1.] += EPSILON
+        assert (torch.all(torch.logical_and(x<1., x>0.)))
+        return x
     
     def label2raw(self, batch: torch.Tensor):
         l, h = self.__get_low_high(batch.device)
-        x =  l + batch * (h - l)
-        x = x.view(x.shape[0], *self.shape)
+        x = batch.view(batch.shape[0], *self.shape)
+        x =  l + x * (h - l)
+        x[x == l] += EPSILON
+        x[x == h] -= EPSILON
+        assert (torch.all(torch.logical_and(x<h, x>l)))
         return x
+
 
 class Categorical(VType):
     """Class for Categorical Variables"""

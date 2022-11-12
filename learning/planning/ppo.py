@@ -163,17 +163,19 @@ class PPO(Configured):
             adv = data[_ADV]
             old_policy = self.__old_actor.forward(data)
             actions = data.select(self.env.names_a).kapply(self.raw2label)
-        
+            old_logprob = old_policy.logprob(actions)
+
         b1 = self.config.ppo_args.kl_penalty
         b2 = self.config.ppo_args.entropy_penalty
 
         policy = self.actor.forward(data)
         logprob = policy.logprob(actions)
-        importance = torch.exp(logprob - old_policy.logprob(actions))
+        importance = torch.exp(logprob - old_logprob)
         kl = old_policy.kl(policy)
         entropy = policy.entropy()
-        
+
         j = importance * adv - b1 * kl + b2 * entropy
+        assert u.TensorOperator.valid(j)
         return -torch.mean(j)
 
     def critic_loss(self, data: Transitions):
@@ -219,7 +221,6 @@ class PPO(Configured):
             for data in buffer.epoch(batchsize):
                 loss = self.critic_loss(data)
                 loss_log['critic'] = float(loss)
-                
                 loss.backward()
                 self.F.optim_step(self.args.optim_args, self.critic,
                                   self.opt_c)

@@ -381,7 +381,7 @@ class Train(Configured):
         # start iteration
         for i in range(n_epoch):
             # evaluating
-            print(f"epoch {i}: ", end='')
+            print(f"epoch {i}: ")
 
             # collect new samples
             log_step, n = self.collect_online()
