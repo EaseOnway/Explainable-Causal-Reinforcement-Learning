@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional, Sequence, Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -105,10 +104,10 @@ class Critic(BaseNN):
         v = self.value(transition)
         v_ = self.value(self.shift_states(transition))
         r = transition.rewards
-        done = transition.done
+        terminated = transition.terminated
         gamma = self.config.rl_args.discount
 
-        v_ = torch.masked_fill(v_, done, 0.)
+        v_ = torch.masked_fill(v_, terminated, 0.)
 
         return (r + gamma * v_) - v
 
@@ -143,7 +142,7 @@ class Actor(BaseNN):
 class PPO(Configured):
     def __init__(self, config: Config):
         super().__init__(config)
-        self.args = self.config.ppo_args
+        self.args = self.config.rl_args
 
         self.actor = Actor(config)
         self.__old_actor = Actor(config)
@@ -165,8 +164,8 @@ class PPO(Configured):
             actions = data.select(self.env.names_a).kapply(self.raw2label)
             old_logprob = old_policy.logprob(actions)
 
-        b1 = self.config.ppo_args.kl_penalty
-        b2 = self.config.ppo_args.entropy_penalty
+        b1 = self.args.kl_penalty
+        b2 = self.args.entropy_penalty
 
         policy = self.actor.forward(data)
         logprob = policy.logprob(actions)
@@ -193,7 +192,7 @@ class PPO(Configured):
         with torch.no_grad():
             transitions = buffer.transitions[:]
             td = self.critic.td_residual(transitions)
-            terminated = transitions.terminated
+            done = transitions.done
             n = transitions.n
             
             w = self.config.rl_args.discount * self.args.gae_lambda
@@ -202,7 +201,7 @@ class PPO(Configured):
                 gae = torch.empty(n, dtype=DType.Numeric.torch)
                 temp = 0
                 for i in range(n-1, -1, -1):
-                    if terminated[i]:
+                    if done[i]:
                         temp = td[i]
                     else:
                         temp = w * temp + td[i]

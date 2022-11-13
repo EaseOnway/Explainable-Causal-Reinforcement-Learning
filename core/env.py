@@ -97,7 +97,7 @@ class Env(abc.ABC):
 
         transition.update(out)
         
-        done = self.done(transition)
+        done = self.terminated(transition)
         reward = self.reward(transition)
         
         if not done:
@@ -177,7 +177,7 @@ class Env(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def done(self, transition: NamedValues) -> bool:
+    def terminated(self, transition: NamedValues) -> bool:
         raise NotImplementedError
 
     @abc.abstractmethod

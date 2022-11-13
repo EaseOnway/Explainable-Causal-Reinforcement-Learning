@@ -16,27 +16,28 @@ train_env = LunarLander()
 
 
 config = cfg.Config(train_env)
-config.causal_args.buffersize = 50000
-config.ppo_args.buffersize = 1024
+config.causal_args.buffer_size = 50000
+config.rl_args.buffer_size = 2048
 config.rl_args.discount = 0.995
-config.ppo_args.gae_lambda = 0.98
-config.rl_args.max_model_tr_len = 16
-config.rl_args.model_ratio = 0.
+config.rl_args.gae_lambda = 0.98
 config.causal_args.pthres_independent = 0.1
 config.causal_args.pthres_likeliratio = 0.1
+config.causal_args.maxlen_truth = 100
+config.causal_args.maxlen_dream = 100
 config.device = torch.device('cuda')
-config.ppo_args.entropy_penalty = 0.02
+config.rl_args.entropy_penalty = 0.02
 config.causal_args.optim_args.lr = 3e-4
-config.ppo_args.kl_penalty = 0.1
+config.rl_args.kl_penalty = 0.1
 config.causal_args.n_iter_train = 100
 config.causal_args.n_iter_eval = 8
 config.causal_args.optim_args.batchsize = 512
-config.ppo_args.optim_args.batchsize = 512
-config.ppo_args.n_epoch_actor = 8
-config.ppo_args.n_epoch_critic = 32
-config.ppo_args.optim_args.lr = 3e-4
+config.rl_args.optim_args.batchsize = 512
+config.rl_args.n_epoch_actor = 8
+config.rl_args.n_epoch_critic = 32
+config.rl_args.optim_args.lr = 3e-4
 
-config.ablations.graph_fixed = True
+# config.ablations.no_env_model = True
+
 trainer = learning.Train(config, "test")
 
 trainer.init_run()

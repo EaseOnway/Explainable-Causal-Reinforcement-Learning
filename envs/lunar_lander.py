@@ -109,7 +109,7 @@ class LunarLander(Env):
 
         return tran, info
 
-    def done(self, transition) -> bool:
+    def terminated(self, transition) -> bool:
         return transition[CRASH] or transition[REST]
     
     def reward(self, transition) -> float:

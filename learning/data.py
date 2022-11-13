@@ -6,6 +6,7 @@ import numpy as np
 from torch import Tensor, BoolTensor
 import torch
 import torch.distributions as D
+import enum
 from utils import TensorOperator as T
 
 
@@ -63,57 +64,67 @@ class Batch():
                               in self.data.items()})
 
 
-class Transitions(Batch):
-    RUNNING = 0
-    DONE = 1
+class Tag(enum.Enum):
+    TERMINATED = 1
     TRUNCATED = 2
+    INITIATED = 3
 
-    def __init__(self, data: Dict[str, Tensor], rewards: Tensor, code: Tensor):
+    @property
+    def mask(self) -> int:
+        return 1 << self.value
+    
+    @staticmethod
+    def encode(terminated: bool, truncated: bool, initiated: bool) -> int:
+        code = 0
+        if terminated:
+            code |= Tag.TERMINATED.mask
+        if truncated:
+            code |= Tag.TRUNCATED.mask 
+        if initiated:
+            code |= Tag.INITIATED.mask
+        return code
+
+
+class Transitions(Batch):
+
+    def __init__(self, data: Dict[str, Tensor], rewards: Tensor,
+                 tagcode: Tensor):
         n = rewards.shape[0]
-        if code.shape != (n,):
+        if tagcode.shape != (n,):
             raise ValueError("wrong shape")
         super().__init__(n, data)
-
         self.rewards = rewards
-        if code.dtype != torch.int8:
-            code = code.to(torch.int8)
-        self.code = code
-    
+        if tagcode.dtype != torch.int32:
+            tagcode = tagcode.to(torch.int32)
+        self.tagcode = tagcode
+
     @property
-    def running(self):
-        return self.code == Transitions.RUNNING
+    def truncated(self):
+        return (self.tagcode & Tag.TRUNCATED.mask) != 0
+
+    @property
+    def terminated(self):
+        return (self.tagcode & Tag.TERMINATED.mask) != 0
     
     @property
     def done(self):
-        return self.code == Transitions.DONE
+        '''truncated or terminated'''
+        return self.tagcode & (Tag.TERMINATED.mask | Tag.TRUNCATED.mask) != 0
     
     @property
-    def truncated(self):
-        return self.code == Transitions.TRUNCATED
-    
-    @property
-    def terminated(self):
-        return self.code != Transitions.RUNNING
+    def initiated(self):
+        return (self.tagcode & Tag.INITIATED.mask) != 0
 
     @staticmethod
-    def from_sample(data: Dict[str, Tensor], reward: float, code: int):
+    def from_sample(data: Dict[str, Tensor], reward: float, tagcode: int):
         data_ = {k: v.reshape(1, *v.shape) for k, v in data.items()}
         reward_ = torch.tensor([reward], dtype=torch.float)
-        code_ = torch.tensor([code], dtype=torch.int8) 
-        return Transitions(data_, reward_, code_)
-    
-    @staticmethod
-    def get_code(done: bool, truncated: bool):
-        if done:
-            return Transitions.DONE
-        elif truncated:
-            return Transitions.TRUNCATED
-        else:
-            return Transitions.RUNNING
+        tagcode_ = torch.tensor([tagcode], dtype=torch.int32) 
+        return Transitions(data_, reward_, tagcode_)
     
     def to(self, device: torch.device):
         return Transitions({k: v.to(device) for k, v in self.data.items()},
-                           self.rewards.to(device), self.code.to(device))
+                           self.rewards.to(device), self.tagcode.to(device))
 
 
 class Distributions:
@@ -154,9 +165,6 @@ class Distributions:
 
     def sample(self):
         return Batch(self.n, {k: d.sample() for k, d in self.items()})
-    
-    def predict(self):
-        return Batch(self.n, {k: d.mode for k, d in self.items()})
 
     def logprob(self, label: Batch):
         lis = list(self.logprobs(label).values())

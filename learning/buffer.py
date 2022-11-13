@@ -22,7 +22,7 @@ class Buffer(Configured):
         self.__size = 0
         self.__data: Dict[str, Tensor] = {}
         self.__rewards = torch.empty(self.__cache_size, dtype=DType.Numeric.torch)
-        self.__codes = torch.empty(self.__cache_size, dtype=torch.int8)
+        self.__tagcodes = torch.empty(self.__cache_size, dtype=torch.int8)
         self.__tensors = _TensorGetter(self)
         self.__arrays = _ArrayGetter(self)
         self.__transitions = _TransitionGetter(self)
@@ -39,8 +39,8 @@ class Buffer(Configured):
         return self.__rewards[self.__beg: self.__beg + self.__size]
     
     @property
-    def codes(self):
-        return self.__codes[self.__beg: self.__beg + self.__size]
+    def tagcodes(self):
+        return self.__tagcodes[self.__beg: self.__beg + self.__size]
 
     def __declear(self, name: str, shape: Shaping.Shape, dtype: torch.dtype):
         if name in self.__data:
@@ -111,12 +111,12 @@ class Buffer(Configured):
     def refresh(self):
         beg, size = self.__beg, self.__size
         to_refresh = tuple(self.__data.values()) + \
-            (self.__rewards, self.__codes)
+            (self.__rewards, self.__tagcodes)
         for array in to_refresh:
             array[0: size] = array[beg: beg + size]
         self.__beg = 0
 
-    def write(self, data: Dict[str, Any], reward: float, done: bool, truncated: bool):
+    def write(self, data: Dict[str, Any], reward: float, tagcode: int):
         if self.__beg + self.__size >= self.__cache_size:
             self.refresh()
 
@@ -131,9 +131,7 @@ class Buffer(Configured):
             tensor[i] = value
         
         self.__rewards[i] = reward
-
-        code = Transitions.get_code(done, truncated)
-        self.__codes[i] = code
+        self.__tagcodes[i] = tagcode
 
         if self.__size == self.__max_size:
             self.__beg += 1
@@ -161,7 +159,7 @@ class Buffer(Configured):
             tensor[i: j] = value.cpu()
         
         self.__rewards[i: j] = transitions.rewards.cpu()
-        self.__codes[i: j] = transitions.code.cpu()
+        self.__tagcodes[i: j] = transitions.tagcode.cpu()
 
         size = j - self.__beg
         if size > self.__max_size:
@@ -196,11 +194,11 @@ class _TransitionGetter:
     
     def __getitem__(self, index) -> Transitions:
         rewards = self.__buffer.rewards[index].to(self.__device)
-        codes = self.__buffer.codes[index].to(self.__device)
+        tagcodes = self.__buffer.tagcodes[index].to(self.__device)
         data = {k: self.__buffer[k][index].to(self.__device)
                 for k in self.__buffer.keys()}
 
         if rewards.ndim == 0:
-            return Transitions.from_sample(data, float(rewards), int(codes))        
+            return Transitions.from_sample(data, float(rewards), int(tagcodes))        
         else:
-            return Transitions(data, rewards, codes)
+            return Transitions(data, rewards, tagcodes)

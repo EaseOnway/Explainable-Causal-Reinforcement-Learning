@@ -1,4 +1,4 @@
-from typing import Any, Dict, Literal, Set, Tuple, final
+from typing import Any, Dict, Literal, Set, Tuple, final, Optional
 from core import Env
 import torch
 
@@ -88,11 +88,12 @@ class NetDims(_BaseConfig):
 class Ablations(_BaseConfig):
     def __init__(self):
         super().__init__()
-
+        
         self.no_attn = False
         self.recur = False
         self.graph_fixed = False  # graph never updates
         self.graph_offline = False  # graph only updates in warmup
+        self.no_env_model = False
 
 
 class OptimArgs(_BaseConfig):
@@ -106,40 +107,35 @@ class OptimArgs(_BaseConfig):
         self.use_grad_clip = True
         self.max_grad_norm = 1.0
 
-class PPOArgs(_BaseConfig):
+
+class RLArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
-
+        self.buffer_size = 2000
+        self.discount = 0.95  # gamma
         self.gae_lambda = 0.9
         self.kl_penalty = 0.1
         self.entropy_penalty = 0.01
         self.n_epoch_critic = 5
         self.n_epoch_actor = 1
-        self.buffersize = 1000
         self.optim_args = OptimArgs()
+
 
 class CausalArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
-        self.buffersize = 10000
+        self.buffer_size = 10000  
+        self.maxlen_truth: Optional[int] = 100
+        self.maxlen_dream: Optional[int] = 100
+        self.dream_batch_size = 32
+        self.n_truth = 200
         self.n_iter_train = 10
         self.n_iter_eval = 2
         self.optim_args = OptimArgs()
         self.prior = 0.25
         self.pthres_independent = 0.05
         self.pthres_likeliratio = 0.1
-        self.conf_decay = 0.1
         self.adaptive_thres = True
-
-
-class RLArgs(_BaseConfig):
-    def __init__(self):
-        super().__init__()
-        
-        self.discount = 0.95  # gamma
-        self.model_batchsize = 128
-        self.model_ratio = 0.8
-        self.max_model_tr_len = 10
 
 
 class Config(_BaseConfig):
@@ -148,7 +144,6 @@ class Config(_BaseConfig):
         self.dims = NetDims()
         self.ablations = Ablations()
         self.causal_args = CausalArgs()
-        self.ppo_args = PPOArgs()
         self.rl_args = RLArgs()
         self.env = env
         self.device = torch.device('cpu')
