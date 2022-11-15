@@ -85,3 +85,44 @@ class TensorOperator:
     @staticmethod
     def valid(x: torch.Tensor):
         return not bool(torch.any(torch.isinf(x)) or torch.any(torch.isnan(x)))
+
+
+class RunningStatistics:
+    def __init__(self):
+        self.n = 0
+        self.mean: torch.Tensor
+        self.__s: torch.Tensor
+        self.std: torch.Tensor
+
+    def add(self, value: torch.Tensor):
+        if value.device.type != 'cpu':
+            value = value.to(device = 'cpu')
+        else:
+            value = value.detach()
+
+        self.n += 1
+        if self.n == 1:
+            self.mean = value
+            self.__s = torch.zeros_like(value, device='cpu')
+        else:
+            old_mean = self.mean
+            self.mean += (value - old_mean) / self.n
+            self.__s += (value - old_mean) * (value - self.mean)
+        
+        self.std = torch.sqrt(self.__s / self.n)
+    
+    def decentralize(self, data: torch.Tensor):
+        if self.n <= 1:
+            return data
+        else:
+            return data - self.mean.to(device = data.device)
+    
+    def normalize(self, data: torch.Tensor):
+        if self.n <= 1:
+            return data
+        else:
+            std = torch.where(self.std == 0., 1., self.std)
+            return data / std.to(device = data.device)
+    
+    def standardize(self, data: torch.Tensor):
+        return self.normalize(self.decentralize(data))

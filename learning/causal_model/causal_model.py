@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 from .causal_net import CausalNet
-from core import EnvInfo
+from core import CausalMdp
 from ..data import Batch, Transitions, Tag
 from ..buffer import Buffer
 from ..base import Configured

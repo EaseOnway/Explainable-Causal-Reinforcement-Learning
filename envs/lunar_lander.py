@@ -140,7 +140,7 @@ class LunarLander(Env):
             reward += 100
         
         if tr[CRASH]:
-            reward -= 100
+            reward += -100
 
         return reward
 

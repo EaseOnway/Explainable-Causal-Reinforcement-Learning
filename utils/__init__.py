@@ -4,3 +4,4 @@ import utils.visualize as visualize
 import utils.typings as typings
 from .fcit import test as fcit_test
 from .log import Log
+from .reward_scaling import RewardScaling

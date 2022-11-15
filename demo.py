@@ -11,6 +11,7 @@ import utils as u
 
 np.set_printoptions(precision=4)
 
+run = input()
 
 demo_env = LunarLander(render=True)
 
@@ -22,5 +23,5 @@ config = cfg.Config(demo_env)
 trainer = learning.Train(config, "demo")
 
 # demo
-trainer.load("experiments\\LunarLander\\test\\run-1\\saved_state_dict")
-demo_env.demo(trainer.ppo.act)
+trainer.load("experiments\\LunarLander\\test\\run-%s\\saved_state_dict" % run)
+demo_env.demo(lambda s: trainer.ppo.act(s)[0])

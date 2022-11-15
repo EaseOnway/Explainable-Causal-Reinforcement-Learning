@@ -119,6 +119,10 @@ class Env(abc.ABC):
 
             if length == 'q':
                 break
+            elif length == 'r':
+                episode += 1
+                i = 0
+                self.reset()
 
             try:
                 length = int(length)

@@ -2,7 +2,7 @@ from typing import Any, Dict, Union, Optional
 
 from .base import Configured
 from .config import Config
-from .data import Transitions
+from .data import Transitions, Batch
 from core.vtype import VType, DType
 
 from utils import Shaping

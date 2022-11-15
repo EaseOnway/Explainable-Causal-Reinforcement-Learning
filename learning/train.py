@@ -3,10 +3,11 @@ from typing import Any, Callable, Dict, List, Literal, Optional, final, Tuple
 import numpy as np
 import torch
 from scipy.stats import chi2
-import pickle
 
 
 import tensorboardX
+from tensorboard.backend.event_processing import event_accumulator
+
 from .data import Batch, Transitions, Tag
 from .buffer import Buffer
 from .causal_discovery import discover, update
@@ -14,9 +15,8 @@ from .causal_model import CausalNet, CausalModel
 from .config import Config
 from .base import Configured
 from .planning import PPO
-from core import Env
-from utils import Log
-from utils.typings import ParentDict, NamedArrays, NamedTensors
+from utils import Log, RewardScaling
+from utils.typings import ParentDict, NamedArrays
 import utils
 
 
@@ -28,9 +28,11 @@ _CAUSAL_GRAPH = 'causal.graph'
 _PPO_ACTOR = 'ppo.actor'
 _PPO_CRITIC = 'ppo.critic'
 _CAUSAL_NET = 'causal.net'
+_REWARD_SCALING = 'reward_scaling'
 _SAVED_STATE_DICT = 'saved_state_dict'
 _SAVED_CONFIG = 'config.txt'
 _RETURN = 'return'
+
 
 
 class Train(Configured):
@@ -42,7 +44,6 @@ class Train(Configured):
         print(self.config)
 
         # arguments
-
         self.causal_args = self.config.causal_args
         self.rl_args = self.config.rl_args
         self.name = name
@@ -64,6 +65,9 @@ class Train(Configured):
 
         # buffer for planning
         self.buffer_p = Buffer(config, config.rl_args.buffer_size)
+
+        # statistics for reward scaling
+        self.__reward_scaling = RewardScaling(self.rl_args.discount)
         
         # declear runtime variables
         self.__n_sample: int
@@ -87,16 +91,17 @@ class Train(Configured):
         return {_PPO_ACTOR: self.ppo.actor.state_dict(),
                 _PPO_CRITIC: self.ppo.critic.state_dict(),
                 _CAUSAL_NET: self.causnet.state_dict(),
-                _CAUSAL_GRAPH: self.__causal_graph}
+                _CAUSAL_GRAPH: self.__causal_graph,
+                _REWARD_SCALING: self.__reward_scaling.state_dict()}
     
     def load_state_dict(self, dic: Dict[str, Any]):
         self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
         self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
         self.causnet.load_state_dict(dic[_CAUSAL_NET])
+        self.__reward_scaling.load_state_dict(dic[_REWARD_SCALING])
         self.causal_graph = dic[_CAUSAL_GRAPH]
 
-
-    def collect(self, buffer: Buffer, n_sample: int, random = False):
+    def __collect(self, buffer: Buffer, n_sample: int, random = False):
         '''collect real-world samples into the buffer, and compute returns'''
 
         log = Log()
@@ -110,7 +115,8 @@ class Train(Configured):
             if random:
                 a = self.env.random_action()
             else:
-                a = self.ppo.act(self.env.current_state)
+                a, _ = self.ppo.act(self.env.current_state,
+                                    compute_logp=False)
             tran, reward, terminated, _ = self.env.step(a)
             truncated = (i_step == max_len)
 
@@ -136,13 +142,15 @@ class Train(Configured):
 
             # write buffer
             tagcode = Tag.encode(terminated, truncated, initiated)
+            if self.rl_args.use_reward_scaling:
+                reward = self.__reward_scaling(reward, (truncated or terminated))
+            
             buffer.write(tran, reward, tagcode)
         
         self.__n_sample += n_sample
         return log
 
-
-    def dream(self, buffer: Buffer, n_sample: int):
+    def __dream(self, buffer: Buffer, n_sample: int):
         '''generate samples into the buffer using the environment model'''
         buffer = self.buffer_p
         log = Log()
@@ -182,7 +190,7 @@ class Train(Configured):
         assert i_sample == n_sample
         return log
 
-    def init_params(self):
+    def __init_params(self):
         self.ppo.actor.init_parameters()
         self.ppo.critic.init_parameters()
         self.causnet.init_parameters()
@@ -190,42 +198,32 @@ class Train(Configured):
                                  if utils.Random.event(self.causal_args.prior)}
                              for j in self.env.names_outputs}
 
-    @final
     def plot_causal_graph(self, format='png'):
         return utils.visualize.plot_digraph(
             self.env.names_inputs + self.env.names_outputs,
             self.__causal_graph, format=format)  # type: ignore
 
-    @final
-    def fit_batch(self, size: int, eval=False):
-        data = self.buffer_m.sample_batch(size)
+    def __fit_batch(self, transitions: Transitions, eval=False):
         self.causnet.train(not eval)
-        lls = self.causnet.get_loglikeli_dic(data)
+        lls = self.causnet.get_loglikeli_dic(transitions)
         ll = self.causnet.loglikelihood(lls)
         loss = -ll
-        
         if not eval:
             loss.backward()
             self.F.optim_step(self.causal_args.optim_args,
                               self.causnet, self.opt)
-
         return float(loss), {k: float(e) for k, e in lls.items()}
 
-    @final
-    def fit(self, n_iter: int, eval=False):
+    def __fit_epoch(self, log: Log, eval=False):
         '''
         train network with fixed causal graph.
         '''
         args = self.causal_args.optim_args
-        log = Log()
-
-        for i_iter in range(n_iter):
-            loss, lls = self.fit_batch(args.batchsize, eval)
+        for batch in self.buffer_m.epoch(args.batchsize):
+            loss, lls = self.__fit_batch(batch, eval)
             log[_LOSS] = loss
             for k, ll in lls.items():
                 log[_LL, k] = ll
-
-        return log
 
     def __show_fit_log(self, log: Log):
         Log.figure(figsize=(12, 5))  # type: ignore
@@ -235,8 +233,7 @@ class Train(Configured):
         log[_LL].plots(self.env.names_outputs)
         Log.show()
     
-    @final
-    def planning(self):
+    def __plan(self):
         loss = self.ppo.optimize(self.buffer_p)
         self.__writer.add_scalar('actor loss', loss['actor'].mean, self.__n_sample)
         self.__writer.add_scalar('critic loss', loss['critic'].mean, self.__n_sample)
@@ -253,8 +250,6 @@ class Train(Configured):
     def __update_causal_graph(self, eval_log: Log,
                               best_log_probs: Dict[str, float], 
                               showinfo=True):
-
-        # n = len(self.outer_buffer)
 
         to_check: List[str] = []
         n = np.log2(self.causal_args.optim_args.batchsize)
@@ -295,14 +290,9 @@ class Train(Configured):
             self.causnet.load_graph(self.__causal_graph)
 
     def __eval(self):
-        eval = self.fit(self.causal_args.n_iter_eval, eval=True)
-        writer = self.__writer
-        writer.add_scalar('fitting loss', eval[_LOSS].mean, self.__n_sample)
-        writer.add_scalars(
-            'log-likelihood',
-            {k: eval[_LL, k].mean for k in self.env.names_outputs},
-            self.__n_sample)
-        return eval
+        log = Log()
+        self.__fit_epoch(log, eval=False)
+        return log
     
     def __get_data_for_causal_discovery(self) -> NamedArrays:
        temp = self.buffer_m.tensors[:]
@@ -331,20 +321,27 @@ class Train(Configured):
                 os.makedirs(path)
         return path
     
+    def __resume_nsample(self, path: str):
+        e = event_accumulator.EventAccumulator(path)
+        e.Reload()
+        return int(e.scalars.Items('return')[-1].step)
+    
     def init_run(self, dir: Optional[str] = None, resume=False,
                  n_sample: Optional[int] = None):
         path = self.__run_dir = self.__get_run_dir(dir)
         self.config.to_txt(path + _SAVED_CONFIG)
 
         if resume:
-            if n_sample is None:
-                raise ValueError
             self.load()
-            self.__n_sample = n_sample
-            self.__writer = tensorboardX.SummaryWriter(path, purge_step=n_sample)
+            if n_sample is None:
+                self.__n_sample = self.__resume_nsample(path)
+                self.__writer = tensorboardX.SummaryWriter(path)
+            else:
+                self.__n_sample = n_sample
+                self.__writer = tensorboardX.SummaryWriter(path, purge_step=n_sample)
         else:
             self.__n_sample = 0
-            self.init_params()
+            self.__init_params()
             self.save()
             self.__writer = tensorboardX.SummaryWriter(path)
 
@@ -355,64 +352,68 @@ class Train(Configured):
         self.buffer_m.clear()
         self.buffer_p.clear()
 
-    def warmup(self, n_sample: int, n_iter: int):
-        log_collect = self.collect(self.buffer_m, n_sample, random=True)
-
-        print(f"warm up: ", end='')
-
-        # causal discovery
-        if not self.ablations.graph_fixed:
-            data = self.__get_data_for_causal_discovery()
-            self.causal_graph = discover(data, self.env,
-                                         self.causal_args.pthres_independent,
-                                         self.show_detail)
-        
+    def warmup(self, n_sample: int, random=False):
+        return self.__collect(self.buffer_m, n_sample, random=random)
+    
+    def fit(self, n_epoch: int):
         # fit causal equation
-        fit_log = self.fit(n_iter)
-        eval = self.__eval()
-        self.save()
-        self.__best_log_probs = {k: eval[_LL, k].mean
+        train_log = Log()
+        for i_epoch in range(n_epoch):
+            self.__fit_epoch(train_log, eval=False)
+            if self.show_detail:
+                print(f"fit epoch {i_epoch} done.")
+        
+        # evaluate
+        eval_log = self.__eval()
+        self.__best_log_probs = {k: eval_log[_LL, k].mean
                                  for k in self.env.names_outputs}
-
+        
         # show info
         if self.show_loss:
-            print('')
-            print(f"fitting loss:\t{eval[_LOSS].mean}")
+            print(f"fitting loss:\t{eval_log[_LOSS].mean}")
         if self.show_detail:
             for k in self.env.names_outputs:
-                print(f"log-likelihood of '{k}':\t{eval[_LL, k].mean}")
+                print(f"log-likelihood of '{k}':\t{eval_log[_LL, k].mean}")
         if self.show_plot:
-            self.__show_fit_log(fit_log)
+            self.__show_fit_log(train_log)
         
+        return train_log, eval_log
+
+    def causal_reasoning(self, n_epoch: int):
+        # causal discovery
+        data = self.__get_data_for_causal_discovery()
+        self.causal_graph = discover(data, self.env,
+                                     self.causal_args.pthres_independent,
+                                     self.show_detail)
+        self.fit(n_epoch)
+        
+        # save
+        self.save()
         print('Done.')
-    
-        return log_collect, fit_log
-    
-    def __iter_step(self):
+
+    def __step_policy_model_based(self):
         # collect true samples
-        log_step = self.collect(self.buffer_m, self.causal_args.n_truth)
+        log_step = self.__collect(self.buffer_m, self.causal_args.n_truth)
         true_reward = log_step[_REWARD].mean
         true_return = log_step[_RETURN].mean
 
         # fit causal equation
-        fit_log = self.fit(self.causal_args.n_iter_train, eval=False)
-
-        # evaluate causal model
-        eval = self.__eval()
+        _, fit_eval = self.fit(self.causal_args.n_epoch_each_step)
 
         # dream samples
         self.buffer_p.clear()
-        dream_log = self.dream(self.buffer_p, self.buffer_p.max_size)
+        dream_log = self.__dream(self.buffer_p, self.buffer_p.max_size)
         dream_reward = dream_log[_REWARD].mean
 
         # planning
-        plan_loss = self.planning()
+        plan_loss = self.__plan()
         actor_loss = plan_loss['actor'].mean
         critic_loss = plan_loss['critic'].mean
+        actor_entropy = plan_loss['entropy'].mean
 
         # update causal graph
         if not (self.ablations.graph_fixed or self.ablations.graph_offline):
-            self.__update_causal_graph(eval, self.__best_log_probs, self.show_detail)
+            self.__update_causal_graph(fit_eval, self.__best_log_probs, self.show_detail)
 
         # write summary
         writer = self.__writer
@@ -422,32 +423,37 @@ class Train(Configured):
         writer.add_scalar('reward (dream)', dream_reward, self.__n_sample)
         writer.add_scalar('actor loss', actor_loss, self.__n_sample)
         writer.add_scalar('critic loss', critic_loss, self.__n_sample)
+        writer.add_scalar('actor_entropy', actor_entropy, self.__n_sample)
+        writer.add_scalar('fitting loss', fit_eval[_LOSS].mean, self.__n_sample)
+        writer.add_scalars('log-likelihood',
+                           {k: fit_eval[_LL, k].mean
+                            for k in self.env.names_outputs},
+                           self.__n_sample)
 
         # show info
         if self.show_loss:
-            print(f"mean reward:\t{true_reward} (truth); {dream_reward} (dream)")
-            print(f"episodic return:\t{true_return}")
             print(f"actor loss:\t{plan_loss['actor'].mean}")
             print(f"critic loss:\t{plan_loss['critic'].mean}")
-            print(f"fitting loss:\t{eval[_LOSS].mean}")
         if self.show_detail:
-            for k in self.env.names_outputs:
-                print(f"log-likelihood of '{k}':\t{eval[_LL, k].mean}")
+            print(f"episodic return:\t{true_return}")
+            print(f"mean reward:\t{true_reward} (truth); {dream_reward} (dream)")
+            print(f"actor entropy:\t{actor_entropy}")
         if self.show_plot:
-            self.__show_fit_log(fit_log)
             self.ppo.show_loss(plan_loss)
     
-    def __iter_step_no_env_model(self):
+    def __step_policy_model_free(self):
         # collect samples
         self.buffer_p.clear()
-        log = self.collect(self.buffer_p, self.buffer_p.max_size)
+        log = self.__collect(self.buffer_p, self.buffer_p.max_size)
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
+        self.buffer_m.append(self.buffer_p.transitions[:])
 
         # planning
-        plan_loss = self.planning()
+        plan_loss = self.__plan()
         actor_loss = plan_loss['actor'].mean
         critic_loss = plan_loss['critic'].mean
+        actor_entropy = plan_loss['entropy'].mean
 
         # write summary
         writer = self.__writer
@@ -456,22 +462,26 @@ class Train(Configured):
             writer.add_scalar('return', true_return, self.__n_sample)
         writer.add_scalar('actor loss', actor_loss, self.__n_sample)
         writer.add_scalar('critic loss', critic_loss, self.__n_sample)
+        writer.add_scalar('actor_entropy', actor_entropy, self.__n_sample)
 
         # show info
         if self.show_loss:
-            print(f"mean reward:\t{true_reward} (truth)")
-            print(f"episodic return:\t{true_return}")
             print(f"actor loss:\t{plan_loss['actor'].mean}")
             print(f"critic loss:\t{plan_loss['critic'].mean}")
+        if self.show_detail:
+            print(f"episodic return:\t{true_return}")
+            print(f"mean reward:\t{true_reward}")
+            print(f"actor entropy:\t{actor_entropy}")
         if self.show_plot:
             self.ppo.show_loss(plan_loss)
 
-    def iter(self, n_epoch: int):
+    def iter_policy(self, n_epoch: int, model_based=False):
         for i in range(n_epoch):
             print(f"epoch {i}: ")
-            if self.ablations.no_env_model:
-                self.__iter_step_no_env_model()
+            if model_based:
+                self.__step_policy_model_based()
             else:
-                self.__iter_step()
+                self.__step_policy_model_free()
+            
             self.save()
             print("Done.")

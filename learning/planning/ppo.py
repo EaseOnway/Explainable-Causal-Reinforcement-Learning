@@ -16,7 +16,8 @@ import utils as u
 
 
 _ADV = "_ADV_"  # key for advantage
-_TD = "_TD_"  # key for td-residual
+_TARGET = "_TARGET_"  # key for td-target
+
 
 
 class VariableConcat(BaseNN):
@@ -87,30 +88,51 @@ class Critic(BaseNN):
 
     def forward(self, raw: Batch):
         return self.value(raw)
+    
+    def compute(self, buffer: Buffer):
+        with torch.no_grad():
+            transitions = buffer.transitions[:]
+            terminated = transitions.terminated
+            r = transitions.rewards
 
-    def td_residual(self, transition: Transitions):
-        """TD-residual, which can be used to  
-        - estimate the advantage function (GAE algorithm).
-        - compute the TD error 
+            # compute values
+            v = self.value(transitions)
+            v_next = self.value(self.shift_states(transitions))
+            
+            # compute TD-residuals
+            gamma = self.config.rl_args.discount
+            v_next = torch.masked_fill(v_next, terminated, 0.)
+            td_residual = (r + gamma * v_next) - v
 
-        Args:
-            transition (Batch): data-batch includingstates, acitons, outcomes
-                and next states.
+            # compute advantages using GAE
+            done = transitions.done
+            n = transitions.n
+            w = self.config.rl_args.discount * self.config.rl_args.gae_lambda
+            if w > 0:
+                gae = torch.empty(n, dtype=DType.Numeric.torch,
+                                  device=self.device)
+                temp = 0
+                for i in range(n-1, -1, -1):
+                    if done[i]:
+                        temp = td_residual[i]
+                    else:
+                        temp = w * temp + td_residual[i]
+                    gae[i] = temp
+            else:
+                gae = td_residual
+            
+            # compute targets
+            targets = v + gae
 
-        Returns:
-            Tensor: the TD residuals of each sample.
-        """
-
-        v = self.value(transition)
-        v_ = self.value(self.shift_states(transition))
-        r = transition.rewards
-        terminated = transition.terminated
-        gamma = self.config.rl_args.discount
-
-        v_ = torch.masked_fill(v_, terminated, 0.)
-
-        return (r + gamma * v_) - v
-
+        if self.config.rl_args.use_adv_norm:
+            std, mean = torch.std_mean(gae)
+            adv = (gae - mean) / (std + 1e-8)
+        else:
+            adv = gae
+        
+        buffer[_ADV] = adv
+        buffer[_TARGET] = targets
+            
 
 class Actor(BaseNN):
     def __init__(self, config: Config):
@@ -130,12 +152,10 @@ class Actor(BaseNN):
 
     def forward(self, raw: Batch):
         e = self.encoder.forward(raw)
-
         out = Distributions(raw.n)
         for k, d in self.decoders.items():
             da = d.forward(e)
             out[k] = da
-
         return out
 
 
@@ -157,7 +177,7 @@ class PPO(Configured):
             old_param = self.__old_actor.get_parameter(name)
             old_param.data[:] = param.data
 
-    def actor_loss(self, data: Transitions):
+    def actor_loss_entropy(self, data: Transitions):
         with torch.no_grad():
             adv = data[_ADV]
             old_policy = self.__old_actor.forward(data)
@@ -175,47 +195,37 @@ class PPO(Configured):
 
         j = importance * adv - b1 * kl + b2 * entropy
         assert u.TensorOperator.valid(j)
-        return -torch.mean(j)
+        return -torch.mean(j), float(torch.mean(entropy))
 
     def critic_loss(self, data: Transitions):
-        td = self.critic.td_residual(data)
-        return torch.mean(torch.square(td))
+        with torch.no_grad():
+            targets = data[_TARGET]
+        
+        value = self.critic.value(data)
+        error = targets - value
+
+        return torch.mean(torch.square(error))
     
-    def act(self, states: NamedValues):
+    def act(self, states: NamedValues, compute_logp=False):
         s =  Batch.from_sample(self.as_raws(states))
         pi = self.actor.forward(s)
-        a = pi.sample().kapply(self.label2raw)
+        a = pi.sample()
+        if compute_logp:
+            logprob = float(pi.logprob(a))
+        else:
+            logprob = None
+        a = a.kapply(self.label2raw)
         a = self.as_numpy(a)
-        return a
-    
-    def __compute_td_gae(self, buffer: Buffer):
-        with torch.no_grad():
-            transitions = buffer.transitions[:]
-            td = self.critic.td_residual(transitions)
-            done = transitions.done
-            n = transitions.n
+        return a, logprob
             
-            w = self.config.rl_args.discount * self.args.gae_lambda
-
-            if w > 0:
-                gae = torch.empty(n, dtype=DType.Numeric.torch)
-                temp = 0
-                for i in range(n-1, -1, -1):
-                    if done[i]:
-                        temp = td[i]
-                    else:
-                        temp = w * temp + td[i]
-                    gae[i] = temp
-            else:
-                gae = td
-
-            buffer[_TD] = td
-            buffer[_ADV] = gae
-
     def optimize(self, buffer: Buffer):
         batchsize = self.args.optim_args.batchsize
         loss_log = u.Log()
 
+        # update old actor
+        self.__old_actor_update()
+        
+        self.critic.compute(buffer)
         for i in range(self.args.n_epoch_critic):
             for data in buffer.epoch(batchsize):
                 loss = self.critic_loss(data)
@@ -224,19 +234,18 @@ class PPO(Configured):
                 self.F.optim_step(self.args.optim_args, self.critic,
                                   self.opt_c)
         
-        self.__old_actor_update()
-        self.__compute_td_gae(buffer)
-
+        self.critic.compute(buffer)
         for i in range(self.args.n_epoch_actor):
             for data in buffer.epoch(batchsize):
-                loss = self.actor_loss(data)
+                loss, entropy = self.actor_loss_entropy(data)
                 loss_log['actor'] = float(loss) 
+                loss_log['entropy'] = entropy
                 loss.backward()
                 self.F.optim_step(self.args.optim_args, self.actor,
                                   self.opt_a)
 
         del buffer[_ADV]
-        del buffer[_TD]
+        del buffer[_TARGET]
 
         return loss_log
     

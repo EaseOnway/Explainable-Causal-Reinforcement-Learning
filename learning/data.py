@@ -165,6 +165,9 @@ class Distributions:
 
     def sample(self):
         return Batch(self.n, {k: d.sample() for k, d in self.items()})
+    
+    def mode(self):
+        return Batch(self.n, {k: d.mode for k, d in self.items()})
 
     def logprob(self, label: Batch):
         lis = list(self.logprobs(label).values())

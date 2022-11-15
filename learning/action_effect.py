@@ -5,9 +5,10 @@ import torch
 
 from .causal_model.inferrer import Inferrer
 from .causal_model import CausalNet
+from .train import Train
 from .data import Batch
 from utils.visualize import plot_digraph
-from utils.typings import NamedTensors
+from utils.typings import NamedTensors, NamedValues
 from .config import Config
 from .base import Configured
 
@@ -19,6 +20,7 @@ class ActionEffect(Configured):
                  attn_thres=0.):
         super().__init__(network.config)
         self.network = network
+        self.attn_thres = attn_thres
 
         # compute:
         # 1. the encodings of action variables
@@ -42,21 +44,19 @@ class ActionEffect(Configured):
                 a_emb = inferrer.aggregator.forward(actions_pa)
                 kstates = self.network.k_model.forward(parents_s)
                 attn = inferrer.get_attn_scores(a_emb, kstates)
-                a_embs[var] = a_emb
-                if len(parents_s) > 0:
-                    selected = (attn >= attn_thres/len(parents_s))
-                    weight = attn[selected]
-                    causation = tuple(s for s, sel in zip(parents_s, selected) if sel)
-                else:
-                    weight = attn
-                    causation = parents_s
-                causations[var] = causation
-                weights[var] = weight
+
+                causations[var] = parents_s
+                weights[var] = attn
         
         self.actions = actions
         self.__embs_a = a_embs
         self.__causations = causations
         self.__weights = weights
+
+        self.__main_causations = {
+            name: tuple(cau for i, cau in enumerate(causations[name])
+                        if weight[i] < attn_thres / len(causations[name]))
+            for name, weight in weights.items()}
     
     def infer(self, var: str, causal_states: Sequence[Any]):
         with torch.no_grad():
@@ -105,7 +105,56 @@ class ActionEffect(Configured):
             else:
                 print("\tno causations")
 
-    def plot(self, format='png'):
+    def plot(self, format='png', main=True):
         return plot_digraph(
             self.config.env.names_outputs, self.__causations,  # type: ignore
             format=format)
+
+
+class Explainner(Configured):
+    def __init__(self, trainer: Train):
+        super().__init__(trainer.config)
+
+        self.trainer = trainer
+        self.causnet = trainer.causnet
+        self._env = trainer.causnet.create_simulated_env(random=False)
+    
+    def perdict_trajectory(self, state: NamedValues,
+                           action: Optional[NamedValues], length: int):
+        transitions = []
+        action_effects = []
+        logps_a = []
+        logps_o = []
+        logps = []
+
+        self._env.reset(state)
+
+        for _ in range(length):
+            if action is None:
+                action, logp_a = self.trainer.ppo.act(
+                    self._env.current_state, compute_logp=True)
+            else:
+                s = Batch.from_sample(self.as_raws(self._env.current_state))
+                a = Batch.from_sample(self.as_raws(action)).kapply(self.raw2label)
+                pi = self.trainer.ppo.actor.forward(s)
+                logp_a = float(pi.logprob(a))
+            
+            transition, reward, terminated, logp_o = self._env.step(action)
+            assert isinstance(logp_a, float)
+            assert isinstance(logp_o, float)
+            logp = logp_a + logp_o
+            ae = ActionEffect(self.causnet, action, 0.8)
+
+            transitions.append(transition)
+            action_effects.append(ae)
+            logps_a.append(logp_a)
+            logps_o.append(logp_o)
+            logps.append(logp)
+
+            action = None
+        
+        return
+
+
+    def explain(self, state_action: NamedValues, horizon: int):
+        raise NotImplementedError

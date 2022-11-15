@@ -93,7 +93,6 @@ class Ablations(_BaseConfig):
         self.recur = False
         self.graph_fixed = False  # graph never updates
         self.graph_offline = False  # graph only updates in warmup
-        self.no_env_model = False
 
 
 class OptimArgs(_BaseConfig):
@@ -119,6 +118,8 @@ class RLArgs(_BaseConfig):
         self.n_epoch_critic = 5
         self.n_epoch_actor = 1
         self.optim_args = OptimArgs()
+        self.use_adv_norm = True
+        self.use_reward_scaling = True
 
 
 class CausalArgs(_BaseConfig):
@@ -129,8 +130,7 @@ class CausalArgs(_BaseConfig):
         self.maxlen_dream: Optional[int] = 100
         self.dream_batch_size = 32
         self.n_truth = 200
-        self.n_iter_train = 10
-        self.n_iter_eval = 2
+        self.n_epoch_each_step = 8
         self.optim_args = OptimArgs()
         self.prior = 0.25
         self.pthres_independent = 0.05
