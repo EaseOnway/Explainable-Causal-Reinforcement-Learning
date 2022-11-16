@@ -2,7 +2,7 @@ import gym
 import gym.envs.box2d.lunar_lander as lunar_lander
 import numpy as np
 
-from core import EnvInfo, Env
+from core import Env
 from core import ContinuousNormal, ContinuousBeta, \
     Boolean, Categorical
 from utils.typings import NamedValues
@@ -39,7 +39,7 @@ class LunarLander(Env):
         
         self.__continuous = continuous
 
-        env_info = EnvInfo()
+        env_info = Env.Info()
         env_info.state(X, ContinuousNormal(scale=None))
         env_info.state(Y, ContinuousNormal(scale=None))
         env_info.state(VX, ContinuousNormal(scale=None))

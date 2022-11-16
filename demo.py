@@ -24,4 +24,4 @@ trainer = learning.Train(config, "demo")
 
 # demo
 trainer.load("experiments\\LunarLander\\test\\run-%s\\saved_state_dict" % run)
-demo_env.demo(lambda s: trainer.ppo.act(s)[0])
+demo_env.demo(lambda s: trainer.ppo.act(s))

@@ -50,7 +50,10 @@ if False:
                      resume=True)
     trainer.warmup(10000, random=True)
     trainer.warmup(20000)
-    trainer.causal_reasoning(50)
+    # trainer.causal_reasoning(100)
+    trainer.causnet.init_parameters()
+    trainer.fit(300)
+    trainer.save()
 
 if True:
     trainer = learning.Train(config, "test", 'plot')
@@ -61,8 +64,7 @@ if True:
     exp = Explainner(trainer)
     trainer.warmup(100)
     tran = trainer.buffer_m.arrays[50]
-
     s = {k: tran[k] for k in trainer.env.names_s}
     a = {k: tran[k] for k in trainer.env.names_a}
 
-    exp.perdict_trajectory(s, a, 10)
+    exp.explain(s, a, mode=True, thres=0.05)

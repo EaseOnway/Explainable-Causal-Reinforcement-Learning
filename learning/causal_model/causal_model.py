@@ -1,25 +1,25 @@
-from typing import Optional
+from typing import Union, Optional
 import torch
 import numpy as np
 
 from .causal_net import CausalNet
-from core import CausalMdp
+from core import Env
 from ..data import Batch, Transitions, Tag
 from ..buffer import Buffer
 from ..base import Configured
 
-from utils.typings import NamedTensors
+from utils.typings import NamedTensors, NamedValues
+import utils
 
 
 class CausalModel(Configured):
     def __init__(self, net: CausalNet, truth_buffer: Buffer,
-                 n: int, max_traj_len: Optional[int] = None):
+                 max_trlen: Optional[int] = None):
         super().__init__(net.config)
         self.__true_env = net.env
         self.init_buffer = self.__get_init_buffer(truth_buffer)
-        self.n = n
         self.model = net
-        self.max_traj_len = max_traj_len
+        self.max_trlen = max_trlen
     
     def __get_init_buffer(self, buffer: Buffer):
         initiated = buffer.transitions[:].initiated.cpu()
@@ -50,18 +50,25 @@ class CausalModel(Configured):
                 code[i] |= Tag.TERMINATED.mask
                 self.__i_step[i] = 0
 
-        if self.max_traj_len is not None:
-            truncated: np.ndarray = (self.__i_step >= self.max_traj_len)
+        if self.max_trlen is not None:
+            truncated: np.ndarray = (self.__i_step >= self.max_trlen)
             code[truncated] |= Tag.TRUNCATED.mask
             self.__i_step[truncated] = 0
 
         return Transitions(transition.data, self.T.a2t(r), self.T.a2t(code))
 
-    def reset(self):
-        batch = self.init_buffer.sample_batch(self.n)
+    def reset(self, arg: Union[Batch, int]):
+        if isinstance(arg, int):
+            n = arg
+            batch = self.init_buffer.sample_batch(n)
+        else:
+            batch = arg
+            n = batch.n
+                
+        n = batch.n
         self.__current_state = batch.select(self.env.names_s)
-        self.__i_step = np.zeros(self.n, dtype=int)
-        self.__initiated = np.ones(self.n, dtype=bool)
+        self.__i_step = np.zeros(n, dtype=int)
+        self.__initiated = np.ones(n, dtype=bool)
     
     @property
     def current_state(self):
@@ -85,3 +92,28 @@ class CausalModel(Configured):
         self.__initiated = self.T.t2a(done, dtype=bool)
 
         return tran
+
+
+class SimulatedEnv(Env):
+    def __init__(self, net: CausalNet):
+        super().__init__(net.env.info)
+        self.mode: bool
+        self.__true_env = net.env
+        self.__net = net
+
+    def init(self, state: NamedValues, mode=False) -> NamedValues:
+        self.mode = mode
+        return state
+    
+    def transit(self, actions: NamedValues):
+        sa = utils.Collections.merge_dic(actions, self.current_state)
+        return self.__net.simulate(sa, self.mode), {}
+
+    def terminated(self, transition: NamedValues) -> bool:
+        return self.__true_env.terminated(transition)
+    
+    def reward(self, transition: NamedValues) -> float:
+        return self.__true_env.reward(transition)
+    
+    def random_action(self) -> NamedValues:
+        return self.__true_env.random_action()

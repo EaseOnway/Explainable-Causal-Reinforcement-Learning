@@ -3,12 +3,12 @@ from typing import Any, Callable, Dict, Sequence, Optional
 import numpy as np
 
 from .scm import ExoVar, EndoVar, StructrualCausalModel
-from .env import EnvInfo, Env
+from .env import Env
 
 
 class CausalMdp(Env):
 
-    def __init__(self, envinfo: EnvInfo):
+    def __init__(self, envinfo: Env.Info):
         super().__init__(envinfo)
         self.__scm = StructrualCausalModel()
 

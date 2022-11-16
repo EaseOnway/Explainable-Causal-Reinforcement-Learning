@@ -6,35 +6,45 @@ from enum import Enum
 from utils.typings import NamedValues, SortedNames
 
 
-class EnvInfo:
-
-    def __init__(self):
-        self.action_names: Set[str] = set()
-        self.state_names: Set[str] = set()
-        self.outcome_names: Set[str] = set()
-        self.vtypes: Dict[str, vtype.VType] = {}
-
-    def _var(self, name: str, vtype: vtype.VType):
-        if name in self.vtypes:
-            raise ValueError(f"'{name}' already exists")
-        self.vtypes[name] = vtype
-
-    def action(self, name: str, vtype: vtype.VType):
-        self._var(name, vtype)
-        self.action_names.add(name)
-
-    def state(self, name: str, vtype: vtype.VType):
-        name_next = Env.name_next(name)
-        self._var(name, vtype)
-        self._var(name_next, vtype)
-        self.state_names.add(name)
-
-    def outcome(self, name: str, vtype: vtype.VType):
-        self._var(name, vtype)
-        self.outcome_names.add(name)
-
 
 class Env(abc.ABC):
+
+    class Info:
+
+        def __init__(self):
+            self.action_names: Set[str] = set()
+            self.state_names: Set[str] = set()
+            self.outcome_names: Set[str] = set()
+            self.vtypes: Dict[str, vtype.VType] = {}
+
+        def _var(self, name: str, vtype: vtype.VType):
+            if name in self.vtypes:
+                raise ValueError(f"'{name}' already exists")
+            self.vtypes[name] = vtype
+
+        def action(self, name: str, vtype: vtype.VType):
+            self._var(name, vtype)
+            self.action_names.add(name)
+
+        def state(self, name: str, vtype: vtype.VType):
+            name_next = Env.name_next(name)
+            self._var(name, vtype)
+            self._var(name_next, vtype)
+            self.state_names.add(name)
+
+        def outcome(self, name: str, vtype: vtype.VType):
+            self._var(name, vtype)
+            self.outcome_names.add(name)
+    
+
+    class Transition:
+        def __init__(self, variables: NamedValues, reward: float,
+                     terminated: bool, **info):
+            self.variables = variables
+            self.reward = reward
+            self.terminated = terminated
+            self.info = info
+
     @staticmethod
     @final
     def name_next(name: str):
@@ -43,7 +53,7 @@ class Env(abc.ABC):
     def __str__(self):
         return type(self).__name__
 
-    def __init__(self, info: EnvInfo):
+    def __init__(self, info: Info):
         self.info = info
         self.__names_a: SortedNames = tuple(sorted(info.action_names))
         self.__names_s: SortedNames = tuple(sorted(info.state_names))
@@ -79,8 +89,7 @@ class Env(abc.ABC):
             self.reset()
             return self.__current_state
 
-    def step(self, action: NamedValues) -> Tuple[NamedValues,
-                                                  float, bool, Any]:
+    def step(self, action: NamedValues) -> Transition:
         ''' input acitons, gain outcomes, and update states. if done, reset.
             return
             - a dict comprising the transition (s, a, o, s')
@@ -89,24 +98,24 @@ class Env(abc.ABC):
             - other information (Any)
         '''
 
-        transition: NamedValues = action.copy()
-        transition.update(self.current_state)
-        transition.update(action)
+        vriables: NamedValues = action.copy()
+        vriables.update(self.current_state)
+        vriables.update(action)
 
         out, info = self.transit(action)
 
-        transition.update(out)
+        vriables.update(out)
         
-        done = self.terminated(transition)
-        reward = self.reward(transition)
+        terminated = self.terminated(vriables)
+        reward = self.reward(vriables)
         
-        if not done:
-            self.__current_state = {name: transition[Env.name_next(name)]
+        if not terminated:
+            self.__current_state = {name: vriables[Env.name_next(name)]
                                     for name in self.names_s}
         else:
             self.reset()
 
-        return transition, reward, done, info
+        return Env.Transition(vriables, reward, terminated, **info)
     
     def demo(self, 
              actor: Optional[Callable[[NamedValues], NamedValues]] = None):
@@ -135,26 +144,29 @@ class Env(abc.ABC):
                 else:
                     a = actor(self.current_state)
                 
-                tr, r, done, info = self.step(a)
+                transition = self.step(a)
+                variables = transition.variables
 
                 print(f"episode {episode}, step {i}:")
                 print(f"| state:")
                 for name in self.names_s:
-                    print(f"| | {name} = {tr[name]}")
+                    print(f"| | {name} = {variables[name]}")
                 print(f"| action:")
                 for name in self.names_a:
-                    print(f"| | {name} = {tr[name]}")
+                    print(f"| | {name} = {variables[name]}")
                 print(f"| next state:")
                 for name in self.names_next_s:
-                    print(f"| | {name} = {tr[name]}")
+                    print(f"| | {name} = {variables[name]}")
                 print(f"| outcome:")
                 for name in self.names_o:
-                    print(f"| | {name} = {tr[name]}")
-                print(f"| reward = {r}")
-                if info is not None:
-                    print(f"| info: {info}")
+                    print(f"| | {name} = {variables[name]}")
+                print(f"| reward = {transition.reward}")
+                if len(transition.info) > 0:
+                    print(f"| info:")
+                    for k, v in transition.info.items():
+                        (f"| | {k} = {v}")
 
-                if done:
+                if transition.terminated:
                     print(f"episode {episode} terminated.")
                     episode += 1
                     i = 0

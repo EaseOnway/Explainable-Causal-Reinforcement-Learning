@@ -115,9 +115,11 @@ class Train(Configured):
             if random:
                 a = self.env.random_action()
             else:
-                a, _ = self.ppo.act(self.env.current_state,
-                                    compute_logp=False)
-            tran, reward, terminated, _ = self.env.step(a)
+                a = self.ppo.act(self.env.current_state, False)
+            transition= self.env.step(a)
+
+            reward = transition.reward
+            terminated = transition.terminated
             truncated = (i_step == max_len)
 
             # record information
@@ -145,7 +147,7 @@ class Train(Configured):
             if self.rl_args.use_reward_scaling:
                 reward = self.__reward_scaling(reward, (truncated or terminated))
             
-            buffer.write(tran, reward, tagcode)
+            buffer.write(transition.variables, reward, tagcode)
         
         self.__n_sample += n_sample
         return log
@@ -157,9 +159,9 @@ class Train(Configured):
 
         max_len = self.causal_args.maxlen_dream
         batchsize = self.causal_args.dream_batch_size
-        env_m = CausalModel(self.causnet, self.buffer_m, batchsize, max_len)
+        env_m = CausalModel(self.causnet, self.buffer_m, max_len)
+        env_m.reset(batchsize)
         
-        env_m.reset()
         tr: List[Transitions] = []
         
         for i_sample in range(0, n_sample, batchsize):
@@ -447,7 +449,8 @@ class Train(Configured):
         log = self.__collect(self.buffer_p, self.buffer_p.max_size)
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
-        self.buffer_m.append(self.buffer_p.transitions[:])
+        self.buffer_m.append(
+            self.buffer_p.sample_batch(self.causal_args.n_truth))
 
         # planning
         plan_loss = self.__plan()

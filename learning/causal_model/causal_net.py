@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.distributions as D
 
-from core.env import Env
 from ..data import Batch, Distributions, Transitions
 from ..base import BaseNN
 from .encoder import VariableEncoder
@@ -86,48 +85,16 @@ class CausalNet(BaseNN):
     def loglikelihood(self, lldic: NamedTensors):
         ls = list(lldic.values())
         return torch.sum(torch.stack(ls))
-
-    def get_attn_dic(self):
-        out: NamedTensors = {}
-        for var in self.env.names_outputs:
-            attn = self.inferrers[var].attn  # nstates * batch
-            attn = attn.detach().cpu().numpy()
-            out[var] = attn
-        return out
     
-    def simulate(self, state_actions: NamedValues):
+    def simulate(self, state_actions: NamedValues, mode=False):
         with torch.no_grad():
             data =  Batch.from_sample(self.as_raws(state_actions))
             dis = self.forward(data)
-            out = dis.sample()
-            logprob = float(dis.logprob(out))
-            
+            if mode:
+                out = dis.mode()
+            else:
+                out = dis.sample()
             out = out.kapply(self.label2raw)
             out = self.as_numpy(out, drop_batch=True)
-        return out, logprob
-    
-    def create_simulated_env(self, random=True):
-        true_env = self.env
-        simulate = self.simulate
+        return out
 
-        class SimulatedEnv(Env):
-            def __init__(self):
-                super().__init__(true_env.info)
-
-            def init(self, state: NamedValues) -> NamedValues:
-                return state
-            
-            def transit(self, actions: NamedValues):
-                sa = utils.Collections.merge_dic(actions, self.current_state)
-                return simulate(sa)
-
-            def terminated(self, transition: NamedValues) -> bool:
-                return true_env.terminated(transition)
-            
-            def reward(self, transition: NamedValues) -> float:
-                return true_env.terminated(transition)
-            
-            def random_action(self) -> NamedValues:
-                return true_env.random_action()
-
-        return SimulatedEnv()

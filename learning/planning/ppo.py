@@ -206,17 +206,16 @@ class PPO(Configured):
 
         return torch.mean(torch.square(error))
     
-    def act(self, states: NamedValues, compute_logp=False):
+    def act(self, states: NamedValues, mode=False):
         s =  Batch.from_sample(self.as_raws(states))
         pi = self.actor.forward(s)
-        a = pi.sample()
-        if compute_logp:
-            logprob = float(pi.logprob(a))
+        if mode:
+            a = pi.mode()
         else:
-            logprob = None
+            a = pi.sample()
         a = a.kapply(self.label2raw)
         a = self.as_numpy(a)
-        return a, logprob
+        return a
             
     def optimize(self, buffer: Buffer):
         batchsize = self.args.optim_args.batchsize

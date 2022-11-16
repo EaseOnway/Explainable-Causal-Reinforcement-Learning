@@ -40,7 +40,8 @@ class Inferrer(BaseNN):
             self.aggregator = Aggregator(da, dk, dh_agg, config)
             self.linear_vs = nn.Linear(ds, dv, **self.torchargs)
             self.linear_va = nn.Linear(dk, dv, **self.torchargs)
-        
+            self.layernorm = nn.LayerNorm([dv], **self.torchargs)
+
         self.feed_forward = nn.Sequential(
             nn.Linear(dv, dv, **self.torchargs),
             nn.LeakyReLU(),
@@ -49,7 +50,7 @@ class Inferrer(BaseNN):
             nn.Linear(dv, dff, **self.torchargs)
         )
 
-        self.attn: torch.Tensor
+        self.attn: Tuple[torch.Tensor, torch.Tensor]
 
     def __rec_infer(self,
                     # parent_actions * batch * dim_a
@@ -91,26 +92,31 @@ class Inferrer(BaseNN):
         q = emb_a  # batch * dim_k
         scores: torch.Tensor = torch.sum(
             kstates * q, dim=2) / np.sqrt(self.dims.inferrer_key)  # num_state * batch
-        attn = torch.softmax(scores, dim=0)  # num_state * batch
-        return attn
+        expscores = torch.exp(scores)
+        sumexpscores = torch.sum(expscores, dim=0) + 1  # batch
+        attn_s = expscores / sumexpscores # attn_s: num_states * batch
+        attn_a = 1 / sumexpscores  # attn_a: batch
+        return attn_s, attn_a
 
-    def attn_infer(self, attn: torch.Tensor,
+    def attn_infer(self, attn_s: torch.Tensor, attn_a: torch.Tensor,
                    emb_a: torch.Tensor, states: torch.Tensor):
         # emb_a: batch * dim_emb_a
-        # attn: num_states * batch
+        # attn_s: num_states * batch
+        # attn_a: batch
         # states: num_states * batch * dim_s
 
         num_state, batch_size = states.shape[:2]
         assert emb_a.shape[0] == batch_size
 
-        vs = self.linear_vs(states)  # num_states * batch * dim_v
-        vs = torch.sum(vs * attn.view(num_state, batch_size, 1),
-                       dim=0)  # batch * dim_v
-        va = self.linear_va(emb_a)   # batch * dim_v
-        out: torch.Tensor = vs + va  # batch * dim_v
+        vs: torch.Tensor = self.linear_vs(states)  # num_states * batch * dim_v
+        va: torch.Tensor = self.linear_va(emb_a)   # batch * dim_v
 
-        # out: batch * dim_v
-        return out
+        v = torch.cat((vs, va.unsqueeze(0)), dim=0)  # (num_states + 1) * batch * dim_v
+        v: torch.Tensor = self.layernorm(v)
+        a = torch.cat((attn_s, attn_a.unsqueeze(0)), dim=0)  # (num_states + 1) * batch
+        a = a.view((num_state + 1), batch_size, 1)
+          
+        return torch.sum(v * a, dim=0)  # batch * dim_v
 
     def __attn_infer(self, actions: torch.Tensor, kstates: torch.Tensor,
                      states: torch.Tensor):
@@ -119,14 +125,15 @@ class Inferrer(BaseNN):
         # states: num_states * batch * dim_s
         emb_a = self.aggregator(actions)
         if not self.ablations.no_attn:
-            attn = self.get_attn_scores(emb_a, kstates)  # num_states * batch
+            attn_s, attn_a = self.get_attn_scores(emb_a, kstates)  # num_states * batch
         else:
             num_state, batch_size = states.shape[:2]
-            attn = torch.full((num_state, batch_size), 1/num_state,
-                              **self.torchargs)
+            attn = 1/(num_state + 1)
+            attn_s = torch.full((num_state, batch_size), attn, **self.torchargs)
+            attn_a = torch.full((batch_size,), attn, **self.torchargs)
 
-        out = self.attn_infer(attn, emb_a, states)
-        self.attn = attn
+        out = self.attn_infer(attn_s, attn_a, emb_a, states)
+        self.attn = (attn_s, attn_a)
         return out
 
     def input_from(self, action_keys: Sequence[str], state_keys: Sequence[str],
