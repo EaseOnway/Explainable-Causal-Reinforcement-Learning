@@ -8,7 +8,7 @@ from scipy.stats import chi2
 import tensorboardX
 from tensorboard.backend.event_processing import event_accumulator
 
-from .data import Batch, Transitions, Tag
+from core import Batch, Transitions, Tag
 from .buffer import Buffer
 from .causal_discovery import discover, update
 from .causal_model import CausalNet, CausalModel

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.distributions as D
 import numpy as np
 from utils import Shaping
-from learning.data import Batch
+from core import Batch
 from learning.config import Config
 from .encoder import Aggregator
 from ..base import BaseNN

@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.distributions as D
 
-from ..data import Batch, Distributions, Transitions
+from core import Batch, Distributions, Transitions
 from ..base import BaseNN
 from .encoder import VariableEncoder
 from .inferrer import StateKey, DistributionInferrer

@@ -1,27 +1,92 @@
+from typing import Optional, Callable
 import torch
 
 from envs import LunarLander
+from core import Env
 import learning.causal_discovery as causal_discovery
 
 import learning
 import numpy as np
 import learning.config as cfg
 import utils as u
+from utils.typings import NamedValues
+from learning.action_effect import Explainner
 
 
-np.set_printoptions(precision=4)
+def demo(trainer: learning.Train, random=False):
+    env = trainer.env
+    env.reset()
+    exp = Explainner(trainer)
 
-run = input()
+    episode = 0
+    i = 0
+    while True:
+        length = input()
+        explain = False
 
-demo_env = LunarLander(render=True)
+        if length == 'q':
+            break
+        elif length == 'r':
+            episode += 1
+            i = 0
+            env.reset()
+        elif length == 'e':
+            explain = True
 
+        try:
+            length = int(length)
+        except ValueError:
+            length = 1
 
-config = cfg.Config(demo_env)
+        for _ in range(length):
+            if random:
+                a = env.random_action()
+            else:
+                a = trainer.ppo.act(env.current_state)
+            
+            transition = env.step(a)
+            variables = transition.variables
 
-# config.ablations.graph_fixed = True
+            print(f"episode {episode}, step {i}:")
+            print(f"| state:")
+            for name in env.names_s:
+                print(f"| | {name} = {variables[name]}")
+            print(f"| action:")
+            for name in env.names_a:
+                print(f"| | {name} = {variables[name]}")
+            print(f"| next state:")
+            for name in env.names_next_s:
+                print(f"| | {name} = {variables[name]}")
+            print(f"| outcome:")
+            for name in env.names_o:
+                print(f"| | {name} = {variables[name]}")
+            print(f"| reward = {transition.reward}")
+            if len(transition.info) > 0:
+                print(f"| info:")
+                for k, v in transition.info.items():
+                    (f"| | {k} = {v}")
+            
+            if explain:
+                exp.explain(variables, maxlen=20, thres=0.1)
 
-trainer = learning.Train(config, "demo")
+            if transition.terminated:
+                print(f"episode {episode} terminated.")
+                episode += 1
+                i = 0
+            else:
+                i += 1
+
+    env.reset()
+
 
 # demo
-trainer.load("experiments\\LunarLander\\test\\run-%s\\saved_state_dict" % run)
-demo_env.demo(lambda s: trainer.ppo.act(s))
+if True:
+    np.set_printoptions(precision=4)
+    demo_env = LunarLander(render=True)
+    config = cfg.Config(demo_env)
+    trainer = learning.Train(config, "demo")
+    run_dir = "exemplar"
+    trainer = learning.Train(config, "test", 'plot')
+    trainer.init_run(f"experiments/LunarLander/test/{run_dir}",
+                     resume=True)
+    demo(trainer)

@@ -6,7 +6,7 @@ import torch
 from .causal_model.inferrer import Inferrer
 from .causal_model import CausalNet, SimulatedEnv
 from .train import Train
-from .data import Batch
+from core import Batch
 from utils.visualize import plot_digraph
 from utils.typings import NamedTensors, NamedValues, Edge, SortedNames
 from .config import Config
@@ -17,7 +17,7 @@ from core import Env
 
 
 _ACTION_EFFECT = "action_effect"
-_CAUSAL_WEIGHT = "causal_weight"
+_CAUSAL_WEIGHTS = "causal_weights"
 
 
 class ActionEffect(Configured):
@@ -135,35 +135,42 @@ class ActionEffect(Configured):
 
 
 class TrajectoryGenerator:
-    def __init__(self, trainer: Train, mode=False):
-        self.env = SimulatedEnv(trainer.causnet)
+    def __init__(self, trainer: Train, thres: float, mode=False):
+        self.env: SimulatedEnv
         self.mode = mode
         self.trainer = trainer
+        self.thres = thres
         
         self.__action: Optional[NamedValues]
-        self.__causal_weight: Dict[str, float]
+        self.__causal_weights: Dict[str, float] = {}
         self.__terminated: bool
 
-    @property
-    def causal_weight(self):
-        return self.__causal_weight
-
-    def reset(self, state: NamedValues, action: NamedValues):
+    def reset(self, variables: NamedValues):
         self.__terminated = False
+        
+        state = {k: variables[k] for k in self.trainer.env.names_s}
+        action = {k: variables[k] for k in self.trainer.env.names_a}
+        self.env = SimulatedEnv(self.trainer.causnet, state, self.mode)
+
         self.__action = action
-        self.__causal_weight = {name: 1.0 for name in self.env.names_s}
-        self.env.reset(state, mode=self.mode)
+        self.__causal_weights = {name: 1. for name in self.env.names_s}
+        self.env.reset()
     
-    def __compute_causal_weight(self, ae: ActionEffect):
+    def __update_causal_weights(self, ae: ActionEffect):
         for name_out in self.env.names_outputs:
             w = 0.
+            if ae[name_out] >= self.thres:
+                if len(self.env.names_s) == 0:
+                    w += ae[name_out]
+                else:
+                    w += np.mean([self.__causal_weights[k]
+                                  for k in self.env.names_s]) * ae[name_out]
             for name_in in ae.who_cause(name_out):
-                w += self.__causal_weight[name_in] * ae[name_in, name_out]
-            if self.__action is not None:
-                w += ae[name_out]
-            self.__causal_weight[name_out] = w
-        
-        new = {s: self.__causal_weight[self.env.name_next(s)]
+                if ae[name_in, name_out] >= self.thres:
+                    w += self.__causal_weights[name_in] * ae[name_in, name_out]
+            self.__causal_weights[name_out] = w
+         
+        new = {s: self.__causal_weights[self.env.name_next(s)]
                for s in self.env.names_s}
         return new
 
@@ -179,92 +186,120 @@ class TrajectoryGenerator:
             transition = self.env.step(a)
             self.__terminated = transition.terminated
             ae = ActionEffect(self.trainer.causnet, a)
-            next_causal_weight = self.__compute_causal_weight(ae)
+            next_causal_weights = self.__update_causal_weights(ae)
             transition.info[_ACTION_EFFECT] = ae
-            transition.info[_CAUSAL_WEIGHT] = self.__causal_weight
-            self.__causal_weight = next_causal_weight
+            transition.info[_CAUSAL_WEIGHTS] = self.__causal_weights
+            self.__causal_weights = next_causal_weights
             
             self.__action = None
             return transition
-    
-    @staticmethod
-    def _average_causal_weight(names: SortedNames,
-                               trgens: Iterable['TrajectoryGenerator']):
-        n = 0
-        dic = {name: 0. for name in names}
-        for trgen in trgens:
-            n += 1
-            weights = trgen.causal_weight
-            for name in names:
-                dic[name] += weights[name]
-        for name in names:
-            dic[name] /= n
-        return dic
             
 
 class Explainner(Configured):
 
-    class MinimalExplanan:
+    class Explanan:
         def __init__(self, step: int, discount: float, env: Env,
-                     transition: Env.Transition, thres=0.1):
+                     transition: Env.Transition, thres: float,
+                     complete=False):
             self.__ae: ActionEffect = transition.info[_ACTION_EFFECT]
-            self.__weights: Dict[str, float] = transition.info[_CAUSAL_WEIGHT]
+            self.__weights: Dict[str, float] = transition.info[_CAUSAL_WEIGHTS]
+            self.__nodes = set(name for name, weight in self.__weights.items()
+                               if weight >= thres)
 
-            self.outcome_names: SortedNames = tuple(
-                name for name in env.names_o
-                if self.__weights[name] >= thres)
-
-            state_names: Set[str] = set()
-            for o in self.outcome_names:
-                for cau in self.__ae.who_cause(o):
-                    if self.__weights[cau] >= thres:
-                        state_names.add(cau)
             self.variables = transition.variables
             self.action = self.__ae.action
-            self.state_names: SortedNames = tuple(sorted(state_names))
-            self.reward = transition.reward
-            self.discounted_reward = self.reward * (discount**step)
+            self.discount = (discount**step)
+            self.total_reward = transition.reward
             self.terminated = transition.terminated
             self.step = step
 
-            self.max_outcome_weight = max(self.__weights[name] for name
-                                          in env.names_o)
-            self.sum_state_weight = sum(self.__weights[name] for name
-                                        in env.names_next_s)
+            self.max_state_weights: float = max(
+                self.__weights[k] for k in env.names_s)
+
+            self.reward_weights: Dict[str, float] = {}
+            self.rewards: Dict[str, float] = {}
+            self.sources: Dict[str, Set[str]] = {}
+
+            # self.sources: Dict[str, Set[str]] = {}
+            for label, rewarder in env.rewarders.items():
+                w = np.mean([self.__weights[node] for node in rewarder.source])
+                if w >= thres:
+                    self.rewards[label] = rewarder(self.variables)
+                    self.reward_weights[label] = w
+                    self.sources[label] = set(rewarder.source) & self.__nodes
+            if complete:
+                self.intervals = self.__get_complete_intervals(env)
+            else:
+                self.intervals = self.__get_minimal_intervals()
+            self.interval_states = self.intervals & set(env.names_s)
+            self.interval_outcomes = self.intervals & set(env.names_s)
+            self.interval_nextstates = self.intervals & set(env.names_next_s)
+        
+        def __get_minimal_intervals(self):
+            nodes: Set[str] = set()
+            for source in self.sources.values():
+                nodes = nodes | source
+            return nodes
+
+        def __get_complete_intervals(self, env: Env):
+            minimal_nodes = self.__get_minimal_intervals()
+            supplements: Set[str] = set()
+            for node in env.names_outputs:
+                if node in minimal_nodes:
+                    for cau in self.__ae.who_cause(node):
+                        if cau in self.__nodes:
+                            supplements.add(cau)
+                if node in self.__nodes:
+                    supplements.add(node)
+            return minimal_nodes | supplements
+                            
 
         def __str__(self):
             lines = []
             lines.append(f"At step {self.step}:")
             
-            if len(self.state_names) > 0:
+            if len(self.interval_states) > 0:
                 if self.step == 0:
-                    lines.append("|\tthe states are:")
-                    for s in self.state_names:
+                    lines.append("|\twe have states:")
+                    for s in self.interval_states:
                         lines.append(f"|\t|\t{s} = {self.variables[s]}")
                 else:
                     lines.append("|\tdue to the former decisions,")
-                    for s in self.state_names:
-                        lines.append(f"|\t|\tstate {s} may possibly be {self.variables[s]} "
-                                    "(weighted by %.4f);" % self.__weights[s])
+                    for s in self.interval_states:
+                        lines.append(f"|\t|\tstate {s} will possibly be {self.variables[s]} "
+                                     "(causal weight = %.4f)" % self.__weights[s])
 
             if self.step == 1:
-                lines.append(f"|\twe take the given action:")
+                lines.append(f"|\tWe take the given action:")
             else:
-                lines.append(f"|\tProbably, we would take an action like:")
+                lines.append(f"|\tWe will possibly take an action like:")
             for k, v in self.action.items():
                 lines.append(f"|\t|\t{k} = {v}")
             
-            if len(self.outcome_names) > 0:
-                lines.append(f"|\tthen causing the outcomes")
-                for o in self.outcome_names:
+            if len(self.interval_outcomes) > 0:
+                lines.append(f"|\tThese will cause the following outcomes:")
+                for o in self.interval_outcomes:
                     lines.append(f"|\t|\t{o} = {self.variables[o]} "
-                                 "(weighted by %.4f);" % self.__weights[o])
+                                 "(causal weight = %.4f)" % self.__weights[o])
                 
-                lines.append("|\tTherefore,")
-                lines.append(f"|\t|\tthe reward is {self.reward}; and")
-                lines.append(f"|\t|\tthe discounted reward is {self.discounted_reward}.")
-                if self.terminated:
-                    lines.append(f"|\tMeanwhile, the episode terminates.")
+            
+            if len(self.interval_nextstates) > 0:
+                if len(self.interval_outcomes) > 0:
+                    lines.append(f"|\tand states will possibly transit to")
+                else:
+                    lines.append(f"|\tThese will cause the states to possibly transit to")
+                for s in self.interval_nextstates:
+                    lines.append(f"|\t|\t{s} = {self.variables[s]} "
+                                 "(causal weight = %.4f)" % self.__weights[s])
+                    
+            if len(self.intervals) > 0:
+                lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % self.discount)
+                for label, reward in self.rewards.items():
+                    lines.append(f"|\t|\t{reward * self.discount} due to {label}"
+                                 "(causal weight = %.4f)" % self.reward_weights[label])
+            
+            if self.terminated:
+                lines.append(f"|\tFinally, The episode terminates.")
 
             return '\n'.join(lines)
 
@@ -274,10 +309,13 @@ class Explainner(Configured):
         self.trainer = trainer
         self.causnet = trainer.causnet
 
-    def explain(self, state: NamedValues, action: NamedValues,
-                maxlen: Optional[int] = None, thres=0.1, mode=False):
-        trgen = TrajectoryGenerator(self.trainer, mode=mode)
-        trgen.reset(state, action)
+    def explain(self, state_action: NamedValues, maxlen: Optional[int] = None,
+                thres=0.1, mode=False, complete=False):
+        
+        np.set_printoptions(precision=5)
+
+        trgen = TrajectoryGenerator(self.trainer, thres, mode=mode)
+        trgen.reset(state_action)
         
         discount = self.config.rl_args.discount
 
@@ -286,13 +324,10 @@ class Explainner(Configured):
             if transition is None:
                 break
             
-            e = Explainner.MinimalExplanan(i, discount, self.env,
-                                           transition, thres)
+            e = Explainner.Explanan(i, discount, self.env, transition,
+                                    thres, complete)
             
-            if e.max_outcome_weight < thres:
-                continue
-            
-            if e.sum_state_weight < thres:
+            if e.max_state_weights < thres:
                 break
-
+            
             print(e)

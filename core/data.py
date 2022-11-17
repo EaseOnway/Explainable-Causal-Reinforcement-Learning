@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional, Union
 
 import numpy as np
 from torch import Tensor, BoolTensor
@@ -8,22 +8,25 @@ import torch
 import torch.distributions as D
 import enum
 from utils import TensorOperator as T
+from utils.typings import NamedTensors
 
 
 class Batch():
 
-    def __init__(self, n: int, data: Optional[Dict[str, Tensor]] = None):
-        self.data: Dict[str, Tensor] = data if data else {}
+    def __init__(self, n: int, data: Optional[NamedTensors] = None):
         self.n = n
-        for value in self.data.values():
-            assert isinstance(value, Tensor)
-            assert value.shape[0] == n
+        self.data: Dict[str, Tensor] = {}
+
+        if data is not None:
+            for name, tensor in data.items():
+                self[name] = tensor
 
     def __getitem__(self, key: str):
         return self.data[key]
 
     def __setitem__(self, key: str, value: Tensor):
-        assert value.shape[0] == self.n
+        if value.shape[0] != self.n:
+            raise ValueError(f"the size of dim 0 should be {self.n}")
         self.data[key] = value
     
     def __contains__(self, key: str):
@@ -41,7 +44,7 @@ class Batch():
     def iter(self):
         return iter(self.data)
 
-    def update(self, other: Batch):
+    def update(self, other: Union[Batch, NamedTensors]):
         for k, v in other.items():
             self[k] = v
     
@@ -192,3 +195,5 @@ class Distributions:
     def entropy(self):
         kls = list(self.entropies().values())
         return torch.sum(torch.stack(kls, dim=1), dim=1)
+
+

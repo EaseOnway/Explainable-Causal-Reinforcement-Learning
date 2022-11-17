@@ -1,13 +1,31 @@
-from typing import Any, Dict, List, Optional, Set, Tuple, final, Callable
+from typing import Any, Dict, Sequence, Optional, Set, Tuple, final, Callable, List
 import abc
 from utils import Shaping
 import core.vtype as vtype
+from core.data import Batch
 from enum import Enum
 from utils.typings import NamedValues, SortedNames
 
 
+import torch
+
+
 
 class Env(abc.ABC):
+
+    class _Rewarder:
+        def __init__(self, source: Sequence[str],
+                     func: Callable[..., float]):
+            self.__source = tuple(source)
+            self.__func = func
+        
+        def __call__(self, variables: NamedValues):
+            values = [variables[k] for k in self.__source]
+            return self.__func(*values)
+        
+        @property
+        def source(self):
+            return self.__source
 
     class Info:
 
@@ -35,7 +53,6 @@ class Env(abc.ABC):
         def outcome(self, name: str, vtype: vtype.VType):
             self._var(name, vtype)
             self.outcome_names.add(name)
-    
 
     class Transition:
         def __init__(self, variables: NamedValues, reward: float,
@@ -73,6 +90,17 @@ class Env(abc.ABC):
         self.__vtypes: Dict[str, vtype.VType] = info.vtypes
 
         self.__current_state: NamedValues
+
+        self.rewarders: Dict[str, Env._Rewarder] = {}
+
+    @final
+    def def_reward(self, label: str, source: Sequence[str],
+                      func: Callable[..., float]):
+        self.rewarders[label] = Env._Rewarder(source, func)
+    
+    @final
+    def undef_reward(self, label: str):
+        del self.rewarders[label]
     
     def reset(self, *args, **kargs):
         ''' initialiize the current state
@@ -105,7 +133,7 @@ class Env(abc.ABC):
         out, info = self.transit(action)
 
         vriables.update(out)
-        
+
         terminated = self.terminated(vriables)
         reward = self.reward(vriables)
         
@@ -117,65 +145,6 @@ class Env(abc.ABC):
 
         return Env.Transition(vriables, reward, terminated, **info)
     
-    def demo(self, 
-             actor: Optional[Callable[[NamedValues], NamedValues]] = None):
-        self.reset()
-
-        episode = 0
-        i = 0
-        while True:
-            length = input()
-
-            if length == 'q':
-                break
-            elif length == 'r':
-                episode += 1
-                i = 0
-                self.reset()
-
-            try:
-                length = int(length)
-            except ValueError:
-                length = 1
-
-            for _ in range(length):
-                if actor is None:
-                    a = self.random_action()
-                else:
-                    a = actor(self.current_state)
-                
-                transition = self.step(a)
-                variables = transition.variables
-
-                print(f"episode {episode}, step {i}:")
-                print(f"| state:")
-                for name in self.names_s:
-                    print(f"| | {name} = {variables[name]}")
-                print(f"| action:")
-                for name in self.names_a:
-                    print(f"| | {name} = {variables[name]}")
-                print(f"| next state:")
-                for name in self.names_next_s:
-                    print(f"| | {name} = {variables[name]}")
-                print(f"| outcome:")
-                for name in self.names_o:
-                    print(f"| | {name} = {variables[name]}")
-                print(f"| reward = {transition.reward}")
-                if len(transition.info) > 0:
-                    print(f"| info:")
-                    for k, v in transition.info.items():
-                        (f"| | {k} = {v}")
-
-                if transition.terminated:
-                    print(f"episode {episode} terminated.")
-                    episode += 1
-                    i = 0
-                else:
-                    i += 1
-
-        self.reset()
-
-
     @abc.abstractmethod
     def init(self, *args, **kargs) -> NamedValues:
         '''
@@ -191,18 +160,21 @@ class Env(abc.ABC):
         - other information (Any)
         '''
         raise NotImplementedError
-    
-    @abc.abstractmethod
-    def terminated(self, transition: NamedValues) -> bool:
-        raise NotImplementedError
 
-    @abc.abstractmethod
-    def reward(self, transition: NamedValues) -> float:
-        raise NotImplementedError
-    
     @abc.abstractmethod
     def random_action(self) -> NamedValues:
         raise NotImplementedError
+    
+    @abc.abstractmethod
+    def terminated(self, variables: NamedValues) -> bool:
+        raise NotImplementedError
+
+    @final
+    def reward(self, variables: NamedValues) -> float:
+        r = 0.
+        for rewarder in self.rewarders.values():
+            r += rewarder(variables)
+        return r
 
     @property
     @final

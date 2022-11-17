@@ -64,7 +64,5 @@ if True:
     exp = Explainner(trainer)
     trainer.warmup(100)
     tran = trainer.buffer_m.arrays[50]
-    s = {k: tran[k] for k in trainer.env.names_s}
-    a = {k: tran[k] for k in trainer.env.names_a}
 
-    exp.explain(s, a, mode=True, thres=0.05)
+    exp.explain(tran, mode=True, thres=0.2, maxlen=50)

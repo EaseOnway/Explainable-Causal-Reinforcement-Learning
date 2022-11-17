@@ -2,11 +2,10 @@ from typing import Dict, Sequence
 import torch
 import torch.nn as nn
 import numpy as np
-from learning import data
 
 from learning.config import Config
 from ..base import BaseNN
-from ..data import Batch
+from core import Batch
 
 
 class VariableEncoder(BaseNN):

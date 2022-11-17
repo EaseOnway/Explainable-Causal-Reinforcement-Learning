@@ -60,7 +60,21 @@ class LunarLander(Env):
         env_info.outcome(FUEL_COST, ContinuousNormal(scale=None))
 
         super().__init__(env_info)
-    
+
+        self.def_reward("distance reduction", (X, Y, NEXT[X], NEXT[Y]),
+            lambda x, y, x_, y_: 100 * (np.sqrt(x*x + y*y) - np.sqrt(x_*x_ + y_*y_)))
+        self.def_reward("velocity reduction", (VX, VY, NEXT[VX], NEXT[VY]),
+            lambda x, y, x_, y_: 100 * (np.sqrt(x*x + y*y) - np.sqrt(x_*x_ + y_*y_)))
+        self.def_reward("balancing", (ANG, NEXT[ANG]),
+            lambda ang, ang_: 100 * (np.abs(ang) - np.abs(ang_)))
+        self.def_reward("landed leg_1", (LEG1, NEXT[LEG1]),
+            lambda leg, leg_: 10 * (float(leg_) - float(leg)))
+        self.def_reward("landed leg_2", (LEG2, NEXT[LEG2]),
+            lambda leg, leg_: 10 * (float(leg_) - float(leg)))
+        self.def_reward("fuel cost", (FUEL_COST,), lambda x: -x)
+        self.def_reward("resting", (REST,), lambda x: 100 if x else 0)
+        self.def_reward("crash", (CRASH,), lambda x: -100 if x else 0)
+
     def __del__(self):
         self.__core.close()
     
@@ -111,38 +125,6 @@ class LunarLander(Env):
 
     def terminated(self, transition) -> bool:
         return transition[CRASH] or transition[REST]
-    
-    def reward(self, transition) -> float:
-        reward = 0
-        tr = transition
-        
-        r0 = (
-            -100 * np.sqrt(tr[X] * tr[X] + tr[Y] * tr[Y])
-            - 100 * np.sqrt(tr[VX] * tr[VX] + tr[VY] * tr[VY])
-            - 100 * abs(tr[ANG])
-            + (10 if tr[LEG1] else 0)
-            + (10 if tr[LEG2] else 0)
-        )  
-        r1 = (
-            -100 * np.sqrt(tr[NEXT[X]] * tr[NEXT[X]] + tr[NEXT[Y]] * tr[NEXT[Y]])
-            - 100 * np.sqrt(tr[NEXT[VX]] * tr[NEXT[VX]] + tr[NEXT[VY]] * tr[NEXT[VY]])
-            - 100 * abs(tr[NEXT[ANG]])
-            + (10 if tr[NEXT[LEG1]] else 0)
-            + (10 if tr[NEXT[LEG2]] else 0)
-        ) 
-        
-        # And ten points for legs contact, the idea is if you
-        # lose contact again after landing, you get negative reward
-        
-        reward = (r1 - r0) - tr[FUEL_COST]
-
-        if tr[REST]:
-            reward += 100
-        
-        if tr[CRASH]:
-            reward += -100
-
-        return reward
 
     def random_action(self):
         a = self.__core.action_space.sample()

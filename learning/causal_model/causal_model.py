@@ -4,7 +4,7 @@ import numpy as np
 
 from .causal_net import CausalNet
 from core import Env
-from ..data import Batch, Transitions, Tag
+from core import Batch, Transitions, Tag
 from ..buffer import Buffer
 from ..base import Configured
 
@@ -95,15 +95,16 @@ class CausalModel(Configured):
 
 
 class SimulatedEnv(Env):
-    def __init__(self, net: CausalNet):
+    def __init__(self, net: CausalNet, init_state: NamedValues,
+                 mode=False):
         super().__init__(net.env.info)
-        self.mode: bool
+        self.mode = mode
+        self.init_state = init_state
         self.__true_env = net.env
         self.__net = net
 
-    def init(self, state: NamedValues, mode=False) -> NamedValues:
-        self.mode = mode
-        return state
+    def init(self) -> NamedValues:
+        return self.init_state
     
     def transit(self, actions: NamedValues):
         sa = utils.Collections.merge_dic(actions, self.current_state)
@@ -111,9 +112,6 @@ class SimulatedEnv(Env):
 
     def terminated(self, transition: NamedValues) -> bool:
         return self.__true_env.terminated(transition)
-    
-    def reward(self, transition: NamedValues) -> float:
-        return self.__true_env.reward(transition)
     
     def random_action(self) -> NamedValues:
         return self.__true_env.random_action()

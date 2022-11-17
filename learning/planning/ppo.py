@@ -9,7 +9,7 @@ from ..causal_model.inferrer import DistributionDecoder
 from ..buffer import Buffer
 from ..config import Config
 from ..base import Configured, BaseNN
-from ..data import Batch, Transitions, Distributions
+from core import Batch, Transitions, Distributions
 from utils.typings import NamedValues
 from core import DType
 import utils as u

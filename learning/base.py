@@ -5,7 +5,7 @@ import torch
 import torch.distributions as D
 
 from .config import *
-from .data import Batch, Distributions, Transitions
+from core import Batch, Distributions, Transitions
 from core import VType, DType
 
 import utils as u
