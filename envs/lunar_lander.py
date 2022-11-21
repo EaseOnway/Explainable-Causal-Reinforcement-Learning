@@ -39,7 +39,7 @@ class LunarLander(Env):
         
         self.__continuous = continuous
 
-        env_info = Env.Info()
+        env_info = Env.Definition()
         env_info.state(X, ContinuousNormal(scale=None))
         env_info.state(Y, ContinuousNormal(scale=None))
         env_info.state(VX, ContinuousNormal(scale=None))

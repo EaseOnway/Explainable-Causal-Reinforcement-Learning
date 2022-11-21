@@ -41,7 +41,6 @@ def update(old: ParentDict, data: NamedArrays, env: Env, target: str,
         if showinfo:
             print("\tcaused by (%s) with assurrance %.5f " % (i, 1 - p))
 
-    # first, do independent tests with states, conditioned on actions
     for i in env.names_inputs:
         _test(i)
     

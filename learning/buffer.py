@@ -27,7 +27,7 @@ class Buffer(Configured):
         self.__arrays = _ArrayGetter(self)
         self.__transitions = _TransitionGetter(self)
 
-        for name, vtype in self.env.info.vtypes.items():
+        for name, vtype in self.env._def.vtypes.items():
             self.__declear(name, vtype.shape, vtype.dtype.torch)
 
     @property
@@ -113,7 +113,7 @@ class Buffer(Configured):
         to_refresh = tuple(self.__data.values()) + \
             (self.__rewards, self.__tagcodes)
         for array in to_refresh:
-            array[0: size] = array[beg: beg + size]
+            array[0: size] = array[beg: beg + size].clone()
         self.__beg = 0
 
     def write(self, data: Dict[str, Any], reward: float, tagcode: int):

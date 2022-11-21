@@ -97,17 +97,17 @@ class CausalModel(Configured):
 class SimulatedEnv(Env):
     def __init__(self, net: CausalNet, init_state: NamedValues,
                  mode=False):
-        super().__init__(net.env.info)
+        super().__init__(net.env._def)
         self.mode = mode
-        self.init_state = init_state
         self.__true_env = net.env
         self.__net = net
+        self.init_state = init_state
 
     def init(self) -> NamedValues:
         return self.init_state
     
     def transit(self, actions: NamedValues):
-        sa = utils.Collections.merge_dic(actions, self.current_state)
+        sa = utils.Collections.merge_dic(self.current_state, actions)
         return self.__net.simulate(sa, self.mode), {}
 
     def terminated(self, transition: NamedValues) -> bool:

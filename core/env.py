@@ -27,7 +27,7 @@ class Env(abc.ABC):
         def source(self):
             return self.__source
 
-    class Info:
+    class Definition:
 
         def __init__(self):
             self.action_names: Set[str] = set()
@@ -55,8 +55,8 @@ class Env(abc.ABC):
             self.outcome_names.add(name)
 
     class Transition:
-        def __init__(self, variables: NamedValues, reward: float,
-                     terminated: bool, **info):
+        def __init__(self, variables: NamedValues,
+                     reward: float, terminated: bool, **info):
             self.variables = variables
             self.reward = reward
             self.terminated = terminated
@@ -70,24 +70,20 @@ class Env(abc.ABC):
     def __str__(self):
         return type(self).__name__
 
-    def __init__(self, info: Info):
-        self.info = info
-        self.__names_a: SortedNames = tuple(sorted(info.action_names))
-        self.__names_s: SortedNames = tuple(sorted(info.state_names))
+    def __init__(self, _def: Definition):
+        self._def = _def
+        self.__names_a: SortedNames = tuple(sorted(_def.action_names))
+        self.__names_s: SortedNames = tuple(sorted(_def.state_names))
         self.__names_next_s: SortedNames = tuple(self.name_next(name) for name in self.__names_s)
         self.__nametuples_s = tuple(zip(self.__names_s, self.__names_next_s))
-        self.__names_o: SortedNames = tuple(sorted(info.outcome_names))
+        self.__names_o: SortedNames = tuple(sorted(_def.outcome_names))
         self.__names_inputs: SortedNames = tuple(sorted(self.__names_s + self.__names_a))
         self.__names_outputs: SortedNames = tuple(sorted(self.__names_o + self.__names_next_s))
         self.__names_all: SortedNames = tuple(sorted(self.__names_inputs + self.__names_outputs))
         self.__num_a = len(self.__names_a)
         self.__num_s = len(self.__names_s)
         self.__num_o = len(self.__names_o)
-        self.__action_id_map = {k: i for i, k in enumerate(self.__names_a)}
-        self.__state_id_map = {k: i for i, k in enumerate(self.__names_s)}
-        self.__state_id_map.update({k: i for i, k in enumerate(self.__names_next_s)})
-        self.__outcome_id_map = {k: i for i, k in enumerate(self.__names_o)}
-        self.__vtypes: Dict[str, vtype.VType] = info.vtypes
+        self.__vtypes: Dict[str, vtype.VType] = _def.vtypes
 
         self.__current_state: NamedValues
 
@@ -126,24 +122,24 @@ class Env(abc.ABC):
             - other information (Any)
         '''
 
-        vriables: NamedValues = action.copy()
-        vriables.update(self.current_state)
-        vriables.update(action)
+        variables: NamedValues = action.copy()
+        variables.update(self.current_state)
+        variables.update(action)
 
         out, info = self.transit(action)
 
-        vriables.update(out)
+        variables.update(out)
 
-        terminated = self.terminated(vriables)
-        reward = self.reward(vriables)
+        terminated = self.terminated(variables)
+        reward = self.reward(variables)
         
         if not terminated:
-            self.__current_state = {name: vriables[Env.name_next(name)]
+            self.__current_state = {name: variables[Env.name_next(name)]
                                     for name in self.names_s}
         else:
             self.reset()
 
-        return Env.Transition(vriables, reward, terminated, **info)
+        return Env.Transition(variables, reward, terminated, **info)
     
     @abc.abstractmethod
     def init(self, *args, **kargs) -> NamedValues:
@@ -235,44 +231,17 @@ class Env(abc.ABC):
         return self.__num_o
     
     @final
-    def name_s(self, i: int, next=False):
-        if next:
-            return self.__names_next_s[i]
-        else:
-            return self.__names_s[i]
-    
-    @final
-    def idx_s(self, name: str):
-        return self.__state_id_map[name]
-    
-    @final
-    def name_a(self, i: int):
-        return self.__names_a[i]
-    
-    @final
-    def idx_a(self, name: str):
-        return self.__action_id_map[name]
-    
-    @final
-    def name_o(self, i: int):
-        return self.__names_o[i]
-    
-    @final
-    def idx_o(self, name: str):
-        return self.__outcome_id_map[name]
-    
-    @final
-    def info_s(self, i: int):
-        return self.__vtypes[self.name_s(i)[0]]
-    
-    @final
-    def info_a(self, i: int):
-        return self.__vtypes[self.name_a(i)]
-    
-    @final
-    def info_o(self, i: int):
-        return self.__vtypes[self.name_o(i)]
-    
-    @final
     def var(self, name: str):
         return self.__vtypes[name]
+
+    def state_of(self, variables: NamedValues):
+        return {k: variables[k] for k in self.__names_s}
+
+    def action_of(self, variables: NamedValues):
+        return {k: variables[k] for k in self.__names_a}
+
+    def next_state_of(self, variables: NamedValues):
+        return {k: variables[k] for k in self.__names_next_s}
+
+    def outcomes_of(self, variables: NamedValues):
+        return {k: variables[k] for k in self.__names_o}

@@ -8,7 +8,7 @@ from .env import Env
 
 class CausalMdp(Env):
 
-    def __init__(self, envinfo: Env.Info):
+    def __init__(self, envinfo: Env.Definition):
         super().__init__(envinfo)
         self.__scm = StructrualCausalModel()
 

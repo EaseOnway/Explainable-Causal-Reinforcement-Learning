@@ -194,14 +194,18 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
         np.set_printoptions(precision=3)
         print('D0 statistics: {}'.format(d0_stats))
         print('D1 statistics: {}\n'.format(d1_stats))
-
+    
+    # special cases
+    if np.all(d0_stats == d1_stats):
+        p_value = 1.
+    else:
     # Compute the p-value (one-tailed t-test
     # that mean of mse ratios equals 1).
-    t, p_value = ttest_1samp((d0_stats + 1e-10) / (d1_stats + 1e-10), 1)
-    if t < 0:
-        p_value = 1 - p_value / 2
-    else:
-        p_value = p_value / 2
+        t, p_value = ttest_1samp((d0_stats + 1e-10) / (d1_stats + 1e-10), 1)
+        if t < 0:
+            p_value = 1 - p_value / 2
+        else:
+            p_value = p_value / 2
 
     if plot_return:
         return (p_value, d0_stats, d1_stats)
