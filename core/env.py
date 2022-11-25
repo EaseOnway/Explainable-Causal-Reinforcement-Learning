@@ -7,10 +7,6 @@ from enum import Enum
 from utils.typings import NamedValues, SortedNames
 
 
-import torch
-
-
-
 class Env(abc.ABC):
 
     class _Rewarder:
@@ -56,7 +52,8 @@ class Env(abc.ABC):
 
     class Transition:
         def __init__(self, variables: NamedValues,
-                     reward: float, terminated: bool, **info):
+                     reward: float, terminated: bool,
+                     **info):
             self.variables = variables
             self.reward = reward
             self.terminated = terminated
@@ -102,7 +99,7 @@ class Env(abc.ABC):
         ''' initialiize the current state
         '''
     
-        self.__current_state = self.init(*args, **kargs)
+        self.__current_state = self.init_episode(*args, **kargs)
     
     @property
     @final
@@ -142,7 +139,7 @@ class Env(abc.ABC):
         return Env.Transition(variables, reward, terminated, **info)
     
     @abc.abstractmethod
-    def init(self, *args, **kargs) -> NamedValues:
+    def init_episode(self, *args, **kargs) -> NamedValues:
         '''
         initialiize the state dict
         '''
@@ -234,14 +231,18 @@ class Env(abc.ABC):
     def var(self, name: str):
         return self.__vtypes[name]
 
-    def state_of(self, variables: NamedValues):
+    def state_of(self, variables: NamedValues) -> NamedValues:
         return {k: variables[k] for k in self.__names_s}
 
-    def action_of(self, variables: NamedValues):
+    def action_of(self, variables: NamedValues) -> NamedValues:
         return {k: variables[k] for k in self.__names_a}
 
-    def next_state_of(self, variables: NamedValues):
+    def next_state_of(self, variables: NamedValues) -> NamedValues:
         return {k: variables[k] for k in self.__names_next_s}
 
-    def outcomes_of(self, variables: NamedValues):
+    def outcomes_of(self, variables: NamedValues) -> NamedValues:
         return {k: variables[k] for k in self.__names_o}
+
+    def texts(self, variables: NamedValues):
+        return {k: self.__vtypes[k].text(v)
+                for k, v in variables.items()}

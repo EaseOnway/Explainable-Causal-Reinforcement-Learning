@@ -101,9 +101,9 @@ class SimulatedEnv(Env):
         self.mode = mode
         self.__true_env = net.env
         self.__net = net
-        self.init_state = init_state
+        self.init_state = init_state.copy()
 
-    def init(self) -> NamedValues:
+    def init_episode(self) -> NamedValues:
         return self.init_state
     
     def transit(self, actions: NamedValues):

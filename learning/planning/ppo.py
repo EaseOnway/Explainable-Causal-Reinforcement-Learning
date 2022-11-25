@@ -60,6 +60,7 @@ class StateEncoder(VariableConcat):
             nn.Linear(dim, dim, **self.torchargs),
             nn.LeakyReLU(),
             nn.Linear(dim, dim, **self.torchargs),
+            nn.LayerNorm([dim], **self.torchargs)
         )
 
     def forward(self, raw: Batch):
@@ -109,7 +110,7 @@ class Critic(BaseNN):
             n = transitions.n
             w = self.config.rl_args.discount * self.config.rl_args.gae_lambda
             if w > 0:
-                gae = torch.empty(n, dtype=DType.Numeric.torch,
+                gae = torch.empty(n, dtype=DType.Real.torch,
                                   device=self.device)
                 temp = 0
                 for i in range(n-1, -1, -1):
@@ -207,7 +208,7 @@ class PPO(Configured):
         return torch.mean(torch.square(error))
     
     def act(self, states: NamedValues, mode=False):
-        s =  Batch.from_sample(self.as_raws(states))
+        s =  Batch.from_sample(self.named_tensors(states))
         pi = self.actor.forward(s)
         if mode:
             a = pi.mode()
@@ -217,9 +218,9 @@ class PPO(Configured):
         a = self.as_numpy(a)
         return a
             
-    def optimize(self, buffer: Buffer):
+    def optimize(self, buffer: Buffer, log: Optional[u.Log] = None):
         batchsize = self.args.optim_args.batchsize
-        loss_log = u.Log()
+        loss_log = log or u.Log()
 
         # update old actor
         self.__old_actor_update()

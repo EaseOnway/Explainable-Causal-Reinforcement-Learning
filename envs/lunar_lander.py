@@ -4,7 +4,7 @@ import numpy as np
 
 from core import Env
 from core import ContinuousNormal, ContinuousBeta, \
-    Boolean, Categorical
+    Boolean, NamedCategorical
 from utils.typings import NamedValues
 
 
@@ -39,27 +39,27 @@ class LunarLander(Env):
         
         self.__continuous = continuous
 
-        env_info = Env.Definition()
-        env_info.state(X, ContinuousNormal(scale=None))
-        env_info.state(Y, ContinuousNormal(scale=None))
-        env_info.state(VX, ContinuousNormal(scale=None))
-        env_info.state(VY, ContinuousNormal(scale=None))
-        env_info.state(ANG, ContinuousNormal(scale=None))
-        env_info.state(V_ANG, ContinuousNormal(scale=None))
-        env_info.state(LEG1, Boolean())
-        env_info.state(LEG2, Boolean())
+        _def = Env.Definition()
+        _def.state(X, ContinuousNormal(scale=None))
+        _def.state(Y, ContinuousNormal(scale=None))
+        _def.state(VX, ContinuousNormal(scale=None))
+        _def.state(VY, ContinuousNormal(scale=None))
+        _def.state(ANG, ContinuousNormal(scale=None))
+        _def.state(V_ANG, ContinuousNormal(scale=None))
+        _def.state(LEG1, Boolean())
+        _def.state(LEG2, Boolean())
 
         if self.__continuous:
-            env_info.action(MAINENG, ContinuousBeta(low=-1., high=1.))
-            env_info.action(LATENG, ContinuousBeta(low=-1., high=1.))
+            _def.action(MAINENG, ContinuousBeta(low=-1., high=1.))
+            _def.action(LATENG, ContinuousBeta(low=-1., high=1.))
         else:
-            env_info.action(ENG, Categorical(4))
+            _def.action(ENG, NamedCategorical('noop', 'left', 'main', 'right'))
 
-        env_info.outcome(CRASH, Boolean())
-        env_info.outcome(REST, Boolean())
-        env_info.outcome(FUEL_COST, ContinuousNormal(scale=None))
+        _def.outcome(CRASH, Boolean())
+        _def.outcome(REST, Boolean())
+        _def.outcome(FUEL_COST, ContinuousNormal(scale=None))
 
-        super().__init__(env_info)
+        super().__init__(_def)
 
         self.def_reward("distance reduction", (X, Y, NEXT[X], NEXT[Y]),
             lambda x, y, x_, y_: 100 * (np.sqrt(x*x + y*y) - np.sqrt(x_*x_ + y_*y_)))
@@ -104,7 +104,7 @@ class LunarLander(Env):
         else:
             return self.DISCRETE_FUEL_COSTS[a]
 
-    def init(self, *args, **kargs):
+    def init_episode(self, *args, **kargs):
         obs, info = self.__core.reset()
         return self.__state_variables(obs)
     

@@ -48,7 +48,7 @@ class Configured:
         self.__env = config.env
         self.__device = config.device
         self.__torchargs = {'device': self.__device,
-                            'dtype': DType.Numeric.torch}
+                            'dtype': DType.Real.torch}
         self.__tensor_operator = u.TensorOperator(**self.__torchargs)
     
     @property
@@ -94,27 +94,12 @@ class Configured:
     def shift_states(self, transition: Batch):
         return Batch(transition.n,
             {s: transition[s_] for s, s_ in self.env.nametuples_s})
-
-    @final
-    def as_raw(self, name: str, value,
-               device: Optional[Any] = None):
-        v = self.v(name)
-        dtype = v.dtype.torch
-        device = device or self.__device
-        if not isinstance(value, torch.Tensor):
-            tensor = torch.tensor(value, device=device, dtype=dtype)
-        else:
-            tensor = value.to(dtype=dtype, device=device)
-
-        if tensor.shape != v.shape:
-            raise ValueError("inconsistent shape")
-        
-        return tensor
     
     @final
-    def as_raws(self, kvalues: NamedValues, device: Optional[Any] = None)\
+    def named_tensors(self, kvalues: NamedValues, device: Optional[Any] = None)\
             -> NamedTensors:
-        return {k: self.as_raw(k, v, device) for k, v in kvalues.items()}
+        device = device or self.__device
+        return {k: self.v(k).tensor(v, device) for k, v in kvalues.items()}
 
     def raw2input(self, name: str, raw: torch.Tensor):
         return self.v(name).raw2input(raw)

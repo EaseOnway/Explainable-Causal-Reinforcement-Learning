@@ -117,10 +117,10 @@ class RLArgs(_BaseConfig):
         self.entropy_penalty = 0.01
         self.n_epoch_critic = 5
         self.n_epoch_actor = 1
+        self.n_round_model_based = 20
         self.optim_args = OptimArgs()
         self.use_adv_norm = True
         self.use_reward_scaling = True
-
 
 class CausalArgs(_BaseConfig):
     def __init__(self):
@@ -129,8 +129,10 @@ class CausalArgs(_BaseConfig):
         self.maxlen_truth: Optional[int] = 100
         self.maxlen_dream: Optional[int] = 100
         self.dream_batch_size = 32
-        self.n_truth = 200
-        self.n_epoch_each_step = 8
+        self.n_true_sample = 200
+        self.n_epoch_fit = 10
+        self.n_epoch_fit_new_graph = 50
+        self.interval_graph_update = 50
         self.optim_args = OptimArgs()
         self.prior = 0.25
         self.pthres_independent = 0.05
@@ -139,11 +141,16 @@ class CausalArgs(_BaseConfig):
 
 
 class Config(_BaseConfig):
-    def __init__(self, env: Env):
+    def __init__(self):
         super().__init__()
         self.dims = NetDims()
         self.ablations = Ablations()
         self.causal_args = CausalArgs()
         self.rl_args = RLArgs()
-        self.env = env
         self.device = torch.device('cpu')
+        self.env: Env
+    
+    def check_valid(self):
+        if not hasattr(self, 'env'):
+            raise AttributeError(
+                "missing configuration of 'env' (environment)")

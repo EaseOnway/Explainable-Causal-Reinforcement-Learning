@@ -21,7 +21,10 @@ import utils
 
 
 _LL = 'loglikelihood'
-_LOSS = 'NLL loss'
+_NLL_LOSS = 'NLL loss'
+_ACTOR_LOSS = 'actor loss'
+_CRITIC_LOSS = 'critic loss'
+_ACTOR_ENTROPY = 'actor entropy'
 _REWARD = 'reward'
 _EXP_ROOT = './experiments/'
 _CAUSAL_GRAPH = 'causal.graph'
@@ -74,7 +77,6 @@ class Train(Configured):
         self.__episodic_return: float
         self.__run_dir: str
         self.__writer: tensorboardX.SummaryWriter
-        self.__best_log_probs: Dict[str, float]
     
     @property
     @final
@@ -116,7 +118,8 @@ class Train(Configured):
                 a = self.env.random_action()
             else:
                 a = self.ppo.act(self.env.current_state, False)
-            transition= self.env.step(a)
+
+            transition = self.env.step(a)
 
             reward = transition.reward
             terminated = transition.terminated
@@ -186,6 +189,9 @@ class Train(Configured):
             for r in reward:
                 log[_REWARD] = float(r)
 
+            if self.rl_args.use_reward_scaling:
+                reward /= self.__reward_scaling.std
+
             t = Transitions(data, reward, code)
             buffer.append(t)
             
@@ -223,23 +229,17 @@ class Train(Configured):
         args = self.causal_args.optim_args
         for batch in self.buffer_m.epoch(args.batchsize):
             loss, lls = self.__fit_batch(batch, eval)
-            log[_LOSS] = loss
+            log[_NLL_LOSS] = loss
             for k, ll in lls.items():
                 log[_LL, k] = ll
 
     def __show_fit_log(self, log: Log):
         Log.figure(figsize=(12, 5))  # type: ignore
-        Log.subplot(121, title=_LOSS)
-        log[_LOSS].plot(color='k')
+        Log.subplot(121, title=_NLL_LOSS)
+        log[_NLL_LOSS].plot(color='k')
         Log.subplot(122, title=_LL)
         log[_LL].plots(self.env.names_outputs)
         Log.show()
-    
-    def __plan(self):
-        loss = self.ppo.optimize(self.buffer_p)
-        self.__writer.add_scalar('actor loss', loss['actor'].mean, self.__n_sample)
-        self.__writer.add_scalar('critic loss', loss['critic'].mean, self.__n_sample)
-        return loss
         
     def load(self, path: Optional[str] = None):
         path = path or self.__run_dir + _SAVED_STATE_DICT
@@ -248,48 +248,6 @@ class Train(Configured):
     def save(self, path: Optional[str] = None):
         path = path or self.__run_dir + _SAVED_STATE_DICT
         torch.save(self.state_dict(), path)
-
-    def __update_causal_graph(self, eval_log: Log,
-                              best_log_probs: Dict[str, float], 
-                              showinfo=True):
-
-        to_check: List[str] = []
-        n = np.log2(self.causal_args.optim_args.batchsize)
-
-        for name in self.env.names_outputs:
-            eval_log_prob = eval_log[_LL, name].mean
-
-            if eval_log_prob >= best_log_probs[name]:
-                best_log_probs[name] = eval_log_prob
-                if showinfo:
-                    print(f"log-p of {name} increased to {eval_log_prob}")
-                continue
-
-            likeli_ratio = 2 * n * (best_log_probs[name] - eval_log_prob)
-            p_value = 1 - chi2.cdf(likeli_ratio, len(self.env.names_inputs))
-
-            if showinfo:
-                print(f"likelihood ratio {name} = {likeli_ratio}, "
-                      f"raising p_value = {p_value}")
-
-            if p_value < self.causal_args.pthres_likeliratio:
-                print(f"reject causal structure of {name}.")
-                best_log_probs[name] = -np.inf
-                to_check.append(name)
-
-        thres = self.causal_args.pthres_independent
-        prior = self.causal_args.prior
-        if self.causal_args.adaptive_thres and thres < prior:
-            thres = prior - (prior - thres) * len(self.buffer_m)\
-                / self.buffer_m.max_size
-
-        if len(to_check) > 0:
-            print(f"start causal discovery for {', '.join(to_check)}.")
-            data = self.__get_data_for_causal_discovery()
-            for target in to_check:
-                update(self.__causal_graph, data, self.env, target,
-                    thres=thres, showinfo=showinfo, inplace=True)
-            self.causnet.load_graph(self.__causal_graph)
 
     def __eval(self):
         log = Log()
@@ -348,7 +306,6 @@ class Train(Configured):
             self.__writer = tensorboardX.SummaryWriter(path)
 
         self.__episodic_return = 0.
-        self.__best_log_probs = {name: -np.inf for name in self.env.names_outputs}
         
         self.env.reset()
         self.buffer_m.clear()
@@ -367,12 +324,10 @@ class Train(Configured):
         
         # evaluate
         eval_log = self.__eval()
-        self.__best_log_probs = {k: eval_log[_LL, k].mean
-                                 for k in self.env.names_outputs}
         
         # show info
         if self.show_loss:
-            print(f"fitting loss:\t{eval_log[_LOSS].mean}")
+            print(f"fitting loss:\t{eval_log[_NLL_LOSS].mean}")
         if self.show_detail:
             for k in self.env.names_outputs:
                 print(f"log-likelihood of '{k}':\t{eval_log[_LL, k].mean}")
@@ -387,35 +342,50 @@ class Train(Configured):
         self.causal_graph = discover(data, self.env,
                                      self.causal_args.pthres_independent,
                                      self.show_detail)
-        self.fit(n_epoch)
+        train_log, eval_log = self.fit(n_epoch)
         
         # save
         self.save()
         print('Done.')
 
-    def __step_policy_model_based(self):
+        return train_log, eval_log
+
+    def __step_policy_model_based(self, i_step: int):
         # collect true samples
-        log_step = self.__collect(self.buffer_m, self.causal_args.n_truth)
+        log_step = self.__collect(self.buffer_m, self.causal_args.n_true_sample)
         true_reward = log_step[_REWARD].mean
         true_return = log_step[_RETURN].mean
 
         # fit causal equation
-        _, fit_eval = self.fit(self.causal_args.n_epoch_each_step)
-
-        # dream samples
-        self.buffer_p.clear()
-        dream_log = self.__dream(self.buffer_p, self.buffer_p.max_size)
-        dream_reward = dream_log[_REWARD].mean
+        if not (self.ablations.graph_fixed or self.ablations.graph_offline) \
+                and i_step % self.causal_args.interval_graph_update == 0:
+            _, fit_eval = self.causal_reasoning(
+                self.causal_args.n_epoch_fit_new_graph)
+        else:
+            # fit causal equation
+            _, fit_eval = self.fit(self.causal_args.n_epoch_fit)
 
         # planning
-        plan_loss = self.__plan()
-        actor_loss = plan_loss['actor'].mean
-        critic_loss = plan_loss['critic'].mean
-        actor_entropy = plan_loss['entropy'].mean
+        plan_log = Log()
+        for i_round in range(self.rl_args.n_round_model_based):
+            # dream samples
+            self.buffer_p.clear()
+            dream_log = self.__dream(self.buffer_p, self.buffer_p.max_size)
+            plan_log[_REWARD] = dream_log[_REWARD].mean
 
-        # update causal graph
-        if not (self.ablations.graph_fixed or self.ablations.graph_offline):
-            self.__update_causal_graph(fit_eval, self.__best_log_probs, self.show_detail)
+            # planning
+            loss = self.ppo.optimize(self.buffer_p)
+            plan_log[_ACTOR_LOSS] = actor_loss = loss['actor'].mean
+            plan_log[_CRITIC_LOSS] = critic_loss = loss['critic'].mean
+            plan_log[_ACTOR_ENTROPY] = actor_entropy = loss['entropy'].mean
+            if self.show_loss:
+                print("round %d: actor loss = %f, critic loss= %f, actor entropy = %f" %
+                        (i_round, actor_loss, critic_loss, actor_entropy))
+
+        actor_loss = plan_log[_ACTOR_LOSS].data[-1]
+        critic_loss = plan_log[_CRITIC_LOSS].data[-1]
+        actor_entropy = plan_log[_ACTOR_ENTROPY].data[-1]
+        dream_reward = plan_log[_REWARD].data[-1]
 
         # write summary
         writer = self.__writer
@@ -426,7 +396,7 @@ class Train(Configured):
         writer.add_scalar('actor loss', actor_loss, self.__n_sample)
         writer.add_scalar('critic loss', critic_loss, self.__n_sample)
         writer.add_scalar('actor_entropy', actor_entropy, self.__n_sample)
-        writer.add_scalar('fitting loss', fit_eval[_LOSS].mean, self.__n_sample)
+        writer.add_scalar('fitting loss', fit_eval[_NLL_LOSS].mean, self.__n_sample)
         writer.add_scalars('log-likelihood',
                            {k: fit_eval[_LL, k].mean
                             for k in self.env.names_outputs},
@@ -434,26 +404,24 @@ class Train(Configured):
 
         # show info
         if self.show_loss:
-            print(f"actor loss:\t{plan_loss['actor'].mean}")
-            print(f"critic loss:\t{plan_loss['critic'].mean}")
+            print(f"actor loss:\t{actor_loss}")
+            print(f"critic loss:\t{critic_loss}")
         if self.show_detail:
             print(f"episodic return:\t{true_return}")
             print(f"mean reward:\t{true_reward} (truth); {dream_reward} (dream)")
             print(f"actor entropy:\t{actor_entropy}")
-        if self.show_plot:
-            self.ppo.show_loss(plan_loss)
     
-    def __step_policy_model_free(self):
+    def __step_policy_model_free(self, i_step: int):
         # collect samples
         self.buffer_p.clear()
         log = self.__collect(self.buffer_p, self.buffer_p.max_size)
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
         self.buffer_m.append(
-            self.buffer_p.sample_batch(self.causal_args.n_truth))
+            self.buffer_p.sample_batch(self.causal_args.n_true_sample))
 
         # planning
-        plan_loss = self.__plan()
+        plan_loss = self.ppo.optimize(self.buffer_p)
         actor_loss = plan_loss['actor'].mean
         critic_loss = plan_loss['critic'].mean
         actor_entropy = plan_loss['entropy'].mean
@@ -478,13 +446,13 @@ class Train(Configured):
         if self.show_plot:
             self.ppo.show_loss(plan_loss)
 
-    def iter_policy(self, n_epoch: int, model_based=False):
-        for i in range(n_epoch):
-            print(f"epoch {i}: ")
+    def iter_policy(self, n_step: int, model_based=False):
+        for i in range(0, n_step):
+            print(f"step {i}: ")
             if model_based:
-                self.__step_policy_model_based()
+                self.__step_policy_model_based(i)
             else:
-                self.__step_policy_model_free()
+                self.__step_policy_model_free(i)
             
             self.save()
             print("Done.")

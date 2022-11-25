@@ -9,9 +9,9 @@ import enum
 
 
 class DType(enum.Enum):
-    Numeric = 0  # real number
+    Real = 0  # real number
     Bool = 1  # boolean number
-    Index = 2  # integar number
+    Integar = 2  # integar number
 
     @property
     def numpy(self):
@@ -24,14 +24,14 @@ class DType(enum.Enum):
 
 NP_DTYPE_MAP = {
     DType.Bool: np.bool8,
-    DType.Numeric: np.float64,
-    DType.Index: np.int64
+    DType.Real: np.float64,
+    DType.Integar: np.int64
 }
 
 TORCH_DTYPE_MAP = {
     DType.Bool: torch.bool,
-    DType.Numeric: torch.float,
-    DType.Index: torch.long
+    DType.Real: torch.float,
+    DType.Integar: torch.long
 }
     
 
@@ -43,7 +43,6 @@ class VType(abc.ABC):
     buffers and neural networks deal with the data relative to this
     variable will be determined by this class.
     """
-
     
     @abc.abstractproperty
     def shape(self) -> Shape:
@@ -63,6 +62,21 @@ class VType(abc.ABC):
         neural network infers not deterministic values, but the distribution
         of the variables."""
         raise NotImplementedError
+
+    def tensor(self, value, device):
+        dtype = self.dtype.torch
+        if not isinstance(value, torch.Tensor):
+            tensor = torch.tensor(value, device=device, dtype=dtype)
+        else:
+            tensor = value.to(dtype=dtype, device=device)
+
+        if tensor.shape != self.shape:
+            raise ValueError("inconsistent shape")
+        
+        return tensor
+
+    def text(self, value: Any) -> str:
+        return str(value)
     
     @abc.abstractproperty
     def dtype(self) -> DType:
@@ -122,7 +136,7 @@ class ContinuousBase(VType):
     
     @property
     def dtype(self):
-        return DType.Numeric
+        return DType.Real
 
     def raw2input(self, batch: torch.Tensor):
         return batch.view(batch.shape[0], -1)
@@ -132,6 +146,45 @@ class ContinuousBase(VType):
     
     def label2raw(self, batch: torch.Tensor):
         return batch.view(batch.shape[0], *self.shape)
+
+
+class IntegarNormal(VType):
+    """Base Class for Continuous Variables"""
+
+    def __init__(self, shape: ShapeLike = (), scale: Optional[float] = 1.):
+        super().__init__()
+        self.__shape = Shaping.as_shape(shape)
+        self.__size = Shaping.get_size(shape)
+        self.__ptype = ptype.Normal(self.size, scale)
+    
+    @property
+    def ptype(self) -> ptype.PType:
+        return self.__ptype
+    
+    @property
+    def shape(self):
+        return self.__shape
+
+    @property
+    def size(self) -> int:
+        """the size of each sample of the variable as torch.Tensor."""
+        return self.__size
+    
+    @property
+    def dtype(self):
+        return DType.Integar
+
+    def raw2input(self, batch: torch.Tensor):
+        return batch.view(batch.shape[0], -1).to(
+            dtype=DType.Real.torch)
+    
+    def raw2label(self, batch: torch.Tensor):
+        return batch.view(batch.shape[0], -1).to(
+            dtype=DType.Real.torch)
+    
+    def label2raw(self, batch: torch.Tensor):
+        return torch.round(batch.view(batch.shape[0], *self.shape)).to(
+            dtype=DType.Integar.torch)
 
 
 class ContinuousNormal(ContinuousBase):
@@ -174,12 +227,12 @@ class ContinuousBeta(ContinuousBase):
         if low is None:
             self.__l = None
         else:
-            self.__l = torch.tensor(low, dtype=DType.Numeric.torch)
+            self.__l = torch.tensor(low, dtype=DType.Real.torch)
 
         if high is None:
             self.__h = None
         else:
-            self.__h = torch.tensor(high, dtype=DType.Numeric.torch)
+            self.__h = torch.tensor(high, dtype=DType.Real.torch)
 
         self.__ptype = ptype.Beta(self.size)
 
@@ -242,11 +295,11 @@ class Categorical(VType):
     
     @property
     def dtype(self):
-        return DType.Index
+        return DType.Integar
 
     def raw2input(self, batch: torch.Tensor):
         return torch.nn.functional.one_hot(batch, self.__k).\
-            to(DType.Numeric.torch)
+            to(DType.Real.torch)
     
     def raw2label(self, batch: torch.Tensor):
         return batch
@@ -257,6 +310,22 @@ class Categorical(VType):
     @property
     def ptype(self) -> ptype.PType:
         return self.__ptype
+
+
+class NamedCategorical(Categorical):
+    """Class for Categorical Variables"""
+
+    def __init__(self, *names: str):
+        """
+        Args:
+            k (int): the number of categories
+        """        
+
+        super().__init__(len(names))
+        self.__names = names
+
+    def text(self, value: Any) -> str:
+        return self.__names[int(value)]
 
 
 class Boolean(Categorical):
@@ -279,10 +348,10 @@ class Boolean(Categorical):
         return DType.Bool
     
     def raw2input(self, batch: torch.Tensor):
-        return super().raw2input(batch.to(DType.Index.torch))
+        return super().raw2input(batch.to(DType.Integar.torch))
     
     def raw2label(self, batch: torch.Tensor):
-        return batch.to(DType.Index.torch)
+        return batch.to(DType.Integar.torch)
     
     def label2raw(self, batch: torch.Tensor):
         return batch.bool()

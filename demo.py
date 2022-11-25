@@ -10,7 +10,7 @@ import numpy as np
 import learning.config as cfg
 import utils as u
 from utils.typings import NamedValues
-from learning.action_effect import Explainner
+from learning import Explainner
 
 
 def demo(trainer: learning.Train, expthres=0.1, explen=20, random=False):
@@ -67,9 +67,9 @@ def demo(trainer: learning.Train, expthres=0.1, explen=20, random=False):
                     (f"| | {k} = {v}")
             
             if explain:
-                exp.explain(env.state_of(transition.variables),
-                            why=env.action_of(transition.variables),
-                            maxlen=explen, thres=expthres, mode=True)
+                exp.why(env.state_of(transition.variables),
+                        action=env.action_of(transition.variables),
+                        maxlen=explen, thres=expthres, mode=True)
 
             if transition.terminated:
                 print(f"episode {episode} terminated.")
@@ -85,7 +85,8 @@ def demo(trainer: learning.Train, expthres=0.1, explen=20, random=False):
 if True:
     np.set_printoptions(precision=4)
     demo_env = LunarLander(render=True)
-    config = cfg.Config(demo_env)
+    config = cfg.Config()
+    config.env = demo_env
     trainer = learning.Train(config, "demo")
     run_dir = "exemplar"
     trainer = learning.Train(config, "test", 'plot')

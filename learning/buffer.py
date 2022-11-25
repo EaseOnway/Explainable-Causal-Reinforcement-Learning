@@ -21,7 +21,7 @@ class Buffer(Configured):
         self.__beg = 0
         self.__size = 0
         self.__data: Dict[str, Tensor] = {}
-        self.__rewards = torch.empty(self.__cache_size, dtype=DType.Numeric.torch)
+        self.__rewards = torch.empty(self.__cache_size, dtype=DType.Real.torch)
         self.__tagcodes = torch.empty(self.__cache_size, dtype=torch.int8)
         self.__tensors = _TensorGetter(self)
         self.__arrays = _ArrayGetter(self)
@@ -120,7 +120,7 @@ class Buffer(Configured):
         if self.__beg + self.__size >= self.__cache_size:
             self.refresh()
 
-        data_ = self.as_raws(data, device='cpu')
+        data_ = self.named_tensors(data, device='cpu')
 
         i = self.__beg + self.__size
         for key, tensor in self.__data.items():

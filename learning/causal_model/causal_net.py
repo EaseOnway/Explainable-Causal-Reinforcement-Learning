@@ -88,7 +88,7 @@ class CausalNet(BaseNN):
     
     def simulate(self, state_actions: NamedValues, mode=False):
         with torch.no_grad():
-            data =  Batch.from_sample(self.as_raws(state_actions))
+            data =  Batch.from_sample(self.named_tensors(state_actions))
             dis = self.forward(data)
             if mode:
                 out = dis.mode()
