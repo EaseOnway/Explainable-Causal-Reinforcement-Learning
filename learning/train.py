@@ -382,11 +382,11 @@ class Train(Configured):
                 print("round %d: actor loss = %f, critic loss= %f, actor entropy = %f" %
                         (i_round, actor_loss, critic_loss, actor_entropy))
 
+        dream_reward = plan_log[_REWARD].data[0]
         actor_loss = plan_log[_ACTOR_LOSS].data[-1]
         critic_loss = plan_log[_CRITIC_LOSS].data[-1]
         actor_entropy = plan_log[_ACTOR_ENTROPY].data[-1]
-        dream_reward = plan_log[_REWARD].data[-1]
-
+        
         # write summary
         writer = self.__writer
         writer.add_scalar('reward (truth)', true_reward, self.__n_sample)

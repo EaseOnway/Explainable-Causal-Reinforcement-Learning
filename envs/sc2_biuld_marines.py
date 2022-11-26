@@ -322,11 +322,14 @@ BUILD_WORKER = 'build_worker'
 BUILD_MARINE = 'build_marine'
 BUILD_BARRACKS = 'build_barracks'
 BUILD_DEPOT = 'build_depot'
+INVALID_ACTION = 'invalid_action'
 
 
 NEXT = {s: Env.name_next(s) for s in (
     N_WORKER, N_BARRACKS, N_MARINE, MONEY, N_SUPPLY_DEPOT, TIMESTEP,
 )}
+
+N_EPISODES_RESTART = 8
 
 
 class SC2BuildMarine(Env):
@@ -342,13 +345,20 @@ class SC2BuildMarine(Env):
         _def.action(BUILD_MARINE, Boolean())
         _def.action(BUILD_DEPOT, Boolean())
         _def.action(BUILD_BARRACKS, Boolean())
+        _def.outcome(INVALID_ACTION, Boolean())
 
         super().__init__(_def)
 
         self.def_reward("new marines", [N_MARINE, NEXT[N_MARINE]],
                         lambda n, n_: n_ - n)
+        self.def_reward("invalid actions", [INVALID_ACTION],
+                        lambda x: -0.5 if x else 0.)
 
-        self._pysc2env = PySC2Env(map_name="BuildMarines",
+        self._pysc2env = self.__make_env()
+        self.__restart_count = 0
+
+    def __make_env(self):
+        return PySC2Env(map_name="BuildMarines",
             players=[Agent(Race.terran)],
             agent_interface_format=AgentInterfaceFormat(
                 feature_dimensions=Dimensions(screen=84, minimap=64),
@@ -364,9 +374,16 @@ class SC2BuildMarine(Env):
             NEXT[N_SUPPLY_DEPOT]: next_state.n_units(SUPPLY_DEPOT),
             NEXT[MONEY]: next_state.money,
             NEXT[TIMESTEP]: self.__i_step,
+            INVALID_ACTION: self.task_failed
         }
 
     def init_episode(self, *args, **kargs) -> NamedValues:
+        self.__restart_count += 1
+        if self.__restart_count >= N_EPISODES_RESTART:
+            self._pysc2env.close()
+            self._pysc2env = self.__make_env()
+            self.__restart_count = 0
+        
         timestep, = self._pysc2env.reset()
         self.__inner_state = StateDescriptor(timestep)
         self.__i_step = 0
