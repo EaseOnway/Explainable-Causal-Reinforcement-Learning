@@ -117,7 +117,8 @@ def obtain_error(data_and_i):
 
 def test(x, y, z=None, num_perm=8, prop_test=.1,
          discrete=(False, False), plot_return=False, verbose=False,
-         logdim=False, cv_grid=[2, 8, 64, 512, 1e-2, .2, .4], **kwargs):
+         logdim=False, cv_grid=[2, 8, 64, 512, 1e-2, .2, .4],
+         n_jobs=-1):
     """ Fast conditional independence test, based on decision-tree regression.
 
     See Chalupka, Perona, Eberhardt 2017 [arXiv link coming].
@@ -136,6 +137,7 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
         logdim (bool): If True, set max_features='log2' in the decision tree.
         cv_grid (list): min_impurity_splits to cross-validate when training
             the decision tree regressor.
+        n_jobs (int): number of cpus to be used.
 
     Returns:
         p (float): The p-value for the null hypothesis
@@ -175,7 +177,7 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
         'reshuffle': False,
         'clf': clf,
     }
-    d1_stats = np.array(joblib.Parallel(n_jobs=-1, max_nbytes=100e6)(
+    d1_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
         joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
 
     # Compute mses for y = f(x, reshuffle(z)), varying train-test splits.
@@ -187,7 +189,7 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
                       verbose, prop_test=prop_test)
     datadict['reshuffle'] = True
     datadict['x'] = x_indep_y
-    d0_stats = np.array(joblib.Parallel(n_jobs=-1, max_nbytes=100e6)(
+    d0_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
         joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
 
     if verbose:

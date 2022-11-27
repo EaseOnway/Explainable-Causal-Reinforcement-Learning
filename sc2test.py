@@ -32,6 +32,7 @@ config.causal_args.n_epoch_fit_new_graph = 200
 config.causal_args.optim_args.batchsize = 512
 config.causal_args.n_true_sample = 128
 config.causal_args.interval_graph_update = 8
+config.causal_args.n_jobs_fcit = 4
 config.rl_args.optim_args.batchsize = 512
 config.rl_args.n_epoch_actor = 2
 config.rl_args.n_epoch_critic = 16

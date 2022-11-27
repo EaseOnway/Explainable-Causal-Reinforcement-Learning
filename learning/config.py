@@ -138,6 +138,7 @@ class CausalArgs(_BaseConfig):
         self.pthres_independent = 0.05
         self.pthres_likeliratio = 0.1
         self.adaptive_thres = True
+        self.n_jobs_fcit = -1
 
 
 class Config(_BaseConfig):

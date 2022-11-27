@@ -14,8 +14,8 @@ def _concat_data(data: NamedArrays, names: Iterable[str]) -> np.ndarray:
     return np.concatenate(to_cat, axis=1)
 
 
-def update(old: ParentDict, data: NamedArrays, env: Env, target: str, 
-           thres=0.05, inplace=True, showinfo=True):
+def update(old: ParentDict, data: NamedArrays, env: Env, target: str,
+           thres=0.05, inplace=True, showinfo=True, n_jobs=-1):
     assert target in env.names_outputs
 
     if inplace:
@@ -33,7 +33,7 @@ def update(old: ParentDict, data: NamedArrays, env: Env, target: str,
 
         cond = _concat_data(data,
             (name for name in env.names_inputs if name != i))
-        p = utils.fcit_test(data[i], data[target], cond)
+        p = utils.fcit_test(data[i], data[target], cond, n_jobs=n_jobs)
         assert isinstance(p, float)
         dependent = p <= thres # or np.isnan(p)
         if dependent:
@@ -50,13 +50,14 @@ def update(old: ParentDict, data: NamedArrays, env: Env, target: str,
     return new
 
 
-def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True
-             ) -> ParentDict:
+def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True,
+             n_jobs=-1) -> ParentDict:
     pa_dic: ParentDict = {
         key: set() for key in env.names_outputs}
 
     for j in env.names_outputs:
-        update(pa_dic, data, env, j, thres, inplace=True, showinfo=showinfo)
+        update(pa_dic, data, env, j, thres, inplace=True, showinfo=showinfo,
+               n_jobs=n_jobs)
     
     if showinfo:
         print('-------------------discovered-causal-graph---------------------')

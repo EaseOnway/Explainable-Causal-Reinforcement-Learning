@@ -348,7 +348,8 @@ class Train(Configured):
         data = self.__get_data_for_causal_discovery()
         self.causal_graph = discover(data, self.env,
                                      self.causal_args.pthres_independent,
-                                     self.show_detail)
+                                     self.show_detail,
+                                     self.causal_args.n_jobs_fcit)
         train_log, eval_log = self.fit(n_epoch)
         
         # save
