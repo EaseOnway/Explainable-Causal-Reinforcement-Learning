@@ -397,15 +397,15 @@ class Train(Configured):
         
         # write summary
         writer = self.__writer
-        writer.add_scalar('reward (truth)', true_reward, self.__n_sample)
+        writer.add_scalar('reward', true_reward, self.__n_sample)
         if not np.isnan(true_return):
             writer.add_scalar('return', true_return, self.__n_sample)
-        writer.add_scalar('reward (dream)', dream_reward, self.__n_sample)
-        writer.add_scalar('actor loss', actor_loss, self.__n_sample)
-        writer.add_scalar('critic loss', critic_loss, self.__n_sample)
+        writer.add_scalar('reward_dreamed', dream_reward, self.__n_sample)
+        writer.add_scalar('actor_loss', actor_loss, self.__n_sample)
+        writer.add_scalar('critic_loss', critic_loss, self.__n_sample)
         writer.add_scalar('actor_entropy', actor_entropy, self.__n_sample)
-        writer.add_scalar('fitting loss', fit_eval[_NLL_LOSS].mean, self.__n_sample)
-        writer.add_scalars('log-likelihood',
+        writer.add_scalar('fitting_loss', fit_eval[_NLL_LOSS].mean, self.__n_sample)
+        writer.add_scalars('log_likelihood',
                            {k: fit_eval[_LL, k].mean
                             for k in self.env.names_outputs},
                            self.__n_sample)
@@ -436,11 +436,11 @@ class Train(Configured):
 
         # write summary
         writer = self.__writer
-        writer.add_scalar('reward (real)', true_reward, self.__n_sample)
+        writer.add_scalar('reward', true_reward, self.__n_sample)
         if not np.isnan(true_return):
             writer.add_scalar('return', true_return, self.__n_sample)
-        writer.add_scalar('actor loss', actor_loss, self.__n_sample)
-        writer.add_scalar('critic loss', critic_loss, self.__n_sample)
+        writer.add_scalar('actor_loss', actor_loss, self.__n_sample)
+        writer.add_scalar('critic_loss', critic_loss, self.__n_sample)
         writer.add_scalar('actor_entropy', actor_entropy, self.__n_sample)
 
         # show info

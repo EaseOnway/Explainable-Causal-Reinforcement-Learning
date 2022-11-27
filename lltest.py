@@ -37,7 +37,7 @@ def make_config(model_based: bool):
     config.causal_args.n_epoch_fit_new_graph = 200
     config.causal_args.optim_args.batchsize = 1024
     config.causal_args.n_true_sample = 1024
-    config.causal_args.interval_graph_update = 8
+    config.causal_args.interval_graph_update = 16
     config.causal_args.n_jobs_fcit = 4
     return config
 
@@ -46,7 +46,7 @@ def train_model_based(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "model_based", 'verbose')
     trainer.init_run("experiments/SC2BuildMarine/model_based/run-1")
-    trainer.warmup(4096, random=True)
+    trainer.warmup(1024*16, random=True)
     trainer.iter_policy(300, model_based=True)
 
 
@@ -90,5 +90,5 @@ def explain(_):
 
 if __name__ == "__main__":
     learning.Train.set_seed(1)
-    app.run(train_model_based)
+    app.run(train_model_free)
     # app.run(explain)
