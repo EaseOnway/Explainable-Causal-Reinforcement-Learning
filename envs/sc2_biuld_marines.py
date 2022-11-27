@@ -503,7 +503,9 @@ class SC2BuildMarine(Env):
         self.__last_task = task
         s = self.__inner_state
         while True:
-            assert not s.is_final
+            if s.is_final:
+                print("Warning: Unexpected Shut Down...")
+                break
             try:
                 a = task.step(s)
                 time_step, = self._pysc2env.step([a])

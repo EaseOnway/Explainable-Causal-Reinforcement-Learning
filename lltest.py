@@ -45,7 +45,7 @@ def make_config(model_based: bool):
 def train_model_based(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "model_based", 'verbose')
-    trainer.init_run("experiments/SC2BuildMarine/model_based/run-1")
+    trainer.init_run()
     trainer.warmup(1024*16, random=True)
     trainer.iter_policy(300, model_based=True)
 
@@ -61,7 +61,7 @@ def train_model_free(_):
 def causal_resoning(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "test", 'plot')
-    trainer.init_run("experiments/LunarLander/test/run-2",
+    trainer.init_run("experiments/LunarLander/exemple",
                      resume=True)
     trainer.warmup(10000, random=True)
     trainer.warmup(50000)
@@ -72,9 +72,8 @@ def causal_resoning(_):
 def explain(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "test", 'plot')
-    trainer.init_run("experiments/SC2BuildMarine/test/run-1",
+    trainer.init_run("experiments/LunarLander/exemple",
                      resume=True)
-    
     trainer.plot_causal_graph().view()
     exp = Explainner(trainer)
     trainer.warmup(15)
