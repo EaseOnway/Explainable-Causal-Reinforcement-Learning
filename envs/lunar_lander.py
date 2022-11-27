@@ -50,8 +50,8 @@ class LunarLander(Env):
         _def.state(LEG2, Binary())
 
         if self.__continuous:
-            _def.action(MAINENG, TruncatedNormal(low=-1., high=1.))
-            _def.action(LATENG, TruncatedNormal(low=-1., high=1.))
+            _def.action(MAINENG, TruncatedNormal(low=-1., high=1., scale=None))
+            _def.action(LATENG, TruncatedNormal(low=-1., high=1., scale=None))
         else:
             _def.action(ENG, NamedCategorical('noop', 'left', 'main', 'right'))
 

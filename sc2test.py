@@ -1,14 +1,9 @@
 import torch
-
-from envs import SC2BuildMarine
-
-import learning
 import numpy as np
+from envs import SC2BuildMarine
+import learning
 import learning.config as cfg
-from absl import app
-
 from learning import Explainner
-
 
 np.set_printoptions(precision=4)
 
@@ -38,7 +33,7 @@ def make_config(model_based: bool):
     config.causal_args.optim_args.batchsize = 512
     config.causal_args.n_true_sample = 128
     config.causal_args.interval_graph_update = 8
-    config.causal_args.n_jobs_fcit = 4
+    config.causal_args.n_jobs_fcit = 8
     return config
 
 
@@ -89,6 +84,23 @@ def explain(_):
 
 
 if __name__ == "__main__":
-    learning.Train.set_seed(1)
-    app.run(train_model_based)
-    # app.run(explain)
+    from absl import app
+    from argparse import ArgumentParser
+    
+    parser = ArgumentParser()
+    parser.add_argument('function', type=str, default='model_based',
+                        help="'model_based', 'model_free', or 'explain'")
+    parser.add_argument('--seed', type=int, default=None)
+    args = parser.parse_args()
+    
+    if args.seed is not None:
+      learning.Train.set_seed(args.seed)
+    
+    if args.function == 'model_based':
+        app.run(train_model_based, ["_"])
+    elif args.function == 'model_free':
+        app.run(train_model_free, ["_"])
+    elif args.function == 'explain':
+        app.run(explain, ["_"])
+    else:
+        raise NotImplementerError(f"Unkown argument: {args.function}")

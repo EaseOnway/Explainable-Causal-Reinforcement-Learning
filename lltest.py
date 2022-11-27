@@ -5,7 +5,7 @@ from envs import LunarLander
 import learning
 import numpy as np
 import learning.config as cfg
-from absl import app
+
 
 from learning import Explainner
 
@@ -21,7 +21,7 @@ def make_config(model_based: bool):
     config.rl_args.discount = 0.98
     config.rl_args.gae_lambda = 0.94
     config.rl_args.kl_penalty = 0.1
-    config.rl_args.entropy_penalty = 0.02
+    config.rl_args.entropy_penalty = 0.001
     config.rl_args.optim_args.batchsize = 1024
     config.rl_args.n_epoch_actor = 2 if model_based else 4
     config.rl_args.n_epoch_critic = 16 if model_based else 32
@@ -38,7 +38,7 @@ def make_config(model_based: bool):
     config.causal_args.optim_args.batchsize = 1024
     config.causal_args.n_true_sample = 1024
     config.causal_args.interval_graph_update = 16
-    config.causal_args.n_jobs_fcit = 4
+    config.causal_args.n_jobs_fcit = 8
     return config
 
 
@@ -55,6 +55,7 @@ def train_model_free(_):
     trainer = learning.Train(config, "model_free", 'verbose')
     trainer.init_run()
     trainer.iter_policy(300, model_based=False)
+    trainer.causal_reasoning(300)
 
 
 def causal_resoning(_):
@@ -89,6 +90,23 @@ def explain(_):
 
 
 if __name__ == "__main__":
-    learning.Train.set_seed(1)
-    app.run(train_model_free)
-    # app.run(explain)
+    from absl import app
+    from argparse import ArgumentParser
+    
+    parser = ArgumentParser()
+    parser.add_argument('function', type=str, default='model_based',
+                        help="'model_based', 'model_free', or 'explain'")
+    parser.add_argument('--seed', type=int, default=None)
+    args = parser.parse_args()
+    
+    if args.seed is not None:
+      learning.Train.set_seed(args.seed)
+    
+    if args.function == 'model_based':
+        app.run(train_model_based, ["_"])
+    elif args.function == 'model_free':
+        app.run(train_model_free, ["_"])
+    elif args.function == 'explain':
+        app.run(explain, ["_"])
+    else:
+        raise NotImplementerError(f"Unkown argument: {args.function}")
