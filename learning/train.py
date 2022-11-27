@@ -1,6 +1,7 @@
 import os
 from typing import Any, Callable, Dict, List, Literal, Optional, final, Tuple
 import numpy as np
+import random
 import torch
 from scipy.stats import chi2
 
@@ -37,8 +38,14 @@ _SAVED_CONFIG = 'config.txt'
 _RETURN = 'return'
 
 
-
 class Train(Configured):
+
+    @staticmethod
+    def set_seed(seed: int):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+        random.seed(seed)
 
     def __init__(self, config: Config, name: str,
                  showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):

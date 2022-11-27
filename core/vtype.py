@@ -328,7 +328,29 @@ class NamedCategorical(Categorical):
         return self.__names[int(value)]
 
 
-class Boolean(Categorical):
+class Boolean(IntegarNormal):
+    """Class for Categorical Variables"""
+
+    def __init__(self, shape: ShapeLike = (), scale: Optional[float] = 1):
+        super().__init__(shape, scale)
+
+    @property
+    def dtype(self):
+        return DType.Bool
+
+    def raw2input(self, batch: torch.Tensor):
+        return torch.where(batch.view(batch.shape[0], -1), 1., -1.).to(
+            dtype=DType.Real.torch)
+    
+    def raw2label(self, batch: torch.Tensor):
+        return torch.where(batch.view(batch.shape[0], -1), 1., -1.).to(
+            dtype=DType.Real.torch)
+    
+    def label2raw(self, batch: torch.Tensor):
+        return batch.view(batch.shape[0], *self.shape) >= 0
+
+
+class Binary(Categorical):
     """Class for Categorical Variables"""
 
     def __init__(self):

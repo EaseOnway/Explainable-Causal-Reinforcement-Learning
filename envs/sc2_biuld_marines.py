@@ -10,7 +10,8 @@ import numpy as np
 import random
 import abc
 
-from core import Env, Categorical, Boolean, IntegarNormal
+from core import Env, Categorical, Binary, IntegarNormal, Boolean, \
+    NamedCategorical
 from utils.typings import NamedValues
 import utils
 
@@ -22,11 +23,13 @@ MARINE = UnitType(units.Terran.Marine)
 MINERAL_FIELD = UnitType(units.Neutral.MineralField)
 BARRACKS = UnitType(units.Terran.Barracks)
 SUPPLY_DEPOT = UnitType(units.Terran.SupplyDepot)
-LOC_BARRACKS = [(30, 10), (30, 50), (40, 10), (40, 50)] + \
-    [(50, j) for j in range(10, 70, 20)]
+UNIT_COST = {MARINE: 50, SCV: 50, BARRACKS: 150, SUPPLY_DEPOT: 100}
+LOC_BARRACKS = [(25, 10), (25, 50), (35, 10), (35, 50)] + \
+    [(50, j) for j in (9, 23, 37, 51)]
 MAXN_BARRACKS = len(LOC_BARRACKS)
 IDX_BARRACKS = {loc: i for i, loc in enumerate(LOC_BARRACKS)}
-LOC_SUPPLY_DEPOTS = [(i, j) for i in [65, 72, 80] for j in range(12, 61, 7)]
+MAXN_BUILDERS = 4
+LOC_SUPPLY_DEPOTS = [(i, j) for i in [60, 67, 74, 81] for j in range(15, 64, 7)]
 MAXN_SUPPLY_DEPOTS = len(LOC_SUPPLY_DEPOTS)
 IDX_SUPPLY_DEPOTS = {loc: i for i, loc in enumerate(LOC_SUPPLY_DEPOTS)}
 MAX_SUPPLY = min(15 + 8 * MAXN_SUPPLY_DEPOTS, 200)
@@ -34,6 +37,7 @@ MAX_SUPPLY = min(15 + 8 * MAXN_SUPPLY_DEPOTS, 200)
 
 class UnitDescriptor:
     def __init__(self, raw: NamedNumpyArray):
+        self.__raw = raw
         self.utype = UnitType(raw.unit_type)
         self.build_progress = int(raw.build_progress)
 
@@ -45,6 +49,9 @@ class UnitDescriptor:
     @property
     def built(self):
         return self.build_progress == 100
+    
+    def __getitem__(self, key: str):
+        return int(getattr(self.__raw, key))
 
 
 class StateDescriptor:
@@ -98,8 +105,14 @@ class StateDescriptor:
     def n_units(self, unit_type: Optional[UnitType] = None):
         return len(self.units(unit_type))
 
-    def can_do(self, action_id):
-        return action_id in self.__available_actions
+    def can_do(self, action):
+        if isinstance(action, list):
+            for a in action:
+                if a.function.value not in self.__available_actions:
+                    return False
+            return True
+        else:
+            return action.function.value in self.__available_actions
 
     def units_not_built(self, unit_type: Optional[UnitType] = None):
         units = self.units(unit_type)
@@ -146,19 +159,23 @@ class ActionMaker:
         return actions.FUNCTIONS.Train_Marine_quick("now")
 
     @staticmethod
-    def biuld_next_depot(s: StateDescriptor):
+    def build_depot(s: StateDescriptor, idx: int = -1):
         n = s.n_units(SUPPLY_DEPOT)
-        if n < MAXN_SUPPLY_DEPOTS:
-            loc = LOC_SUPPLY_DEPOTS[n]
+        idx = n if idx == -1 else idx
+        
+        if n <= idx < MAXN_SUPPLY_DEPOTS:
+            loc = LOC_SUPPLY_DEPOTS[idx]
             return actions.FUNCTIONS.Build_SupplyDepot_screen("now", loc)
         else:
             return ActionMaker.noop()
 
     @staticmethod
-    def biuld_next_barracks(s: StateDescriptor):
+    def build_barracks(s: StateDescriptor, idx: int = -1):
         n = s.n_units(BARRACKS)
-        if n < MAXN_BARRACKS:
-            loc = LOC_BARRACKS[n]
+        idx = n if idx == -1 else idx
+
+        if n <= idx < MAXN_BARRACKS:
+            loc = LOC_BARRACKS[idx]
             return actions.FUNCTIONS.Build_Barracks_screen("now", loc)
         else:
             return ActionMaker.noop()
@@ -190,7 +207,7 @@ class ActionQueue(Task):
                 a = self.action_queue.popleft()
             except IndexError:
                 raise StopIteration
-            if not s.can_do(a.function.value):
+            if not s.can_do(a):
                 self.failed = True
             else:
                 self.n_step += 1
@@ -265,6 +282,7 @@ class BackToWork(ActionQueue):
         return []
 
 
+'''
 class Build(ActionQueue):
 
     def __init__(self, worker=False, marine=False,
@@ -301,15 +319,82 @@ class Build(ActionQueue):
         self.__marine = False
 
         return todo
+'''
 
 
-def build_task(worker=False, marine=False,
-               barracks=False, depot=False):
-    return TaskQueue(
-        Build(worker, marine, barracks, depot),
-        BackToWork(),
-        Sleep(50),
-    )
+class Build(ActionQueue):
+
+    def __init__(self, unit_type: UnitType):
+        super().__init__()
+        self.__type_to_build = unit_type
+    
+    def __begin(self,  s: StateDescriptor) -> Iterable[Any]:
+        todo = []
+        money = s.money
+        unit_cost = UNIT_COST[self.__type_to_build]
+        if self.__type_to_build == SUPPLY_DEPOT:
+            todo.append(ActionMaker.select_by_type(s, SCV))
+            idx = n = s.n_units(SUPPLY_DEPOT)
+            temp = []
+            while money >= unit_cost and idx < min(MAXN_SUPPLY_DEPOTS, n + MAXN_BUILDERS):
+                temp.append(ActionMaker.build_depot(s, idx))
+                money -= unit_cost
+                idx += 1
+            todo.append(temp)
+        elif self.__type_to_build == BARRACKS:
+            todo.append(ActionMaker.select_by_type(s, SCV))
+            idx = n = s.n_units(BARRACKS)
+            temp = []
+            while money > unit_cost and idx < min(MAXN_BARRACKS, n + MAXN_BUILDERS):
+                temp.append(ActionMaker.build_barracks(s, idx))
+                money -= unit_cost
+                idx += 1
+            todo.append(temp)
+        elif self.__type_to_build == SCV:
+            todo.append(ActionMaker.select_one(s.command_center))
+            todo.append(ActionMaker.train_scv())
+        elif self.__type_to_build == MARINE:
+            todo.append(ActionMaker.select_by_type(s, BARRACKS))
+            temp = []
+            for u in s.units(BARRACKS):
+                if u.built and money >= unit_cost:
+                    temp.append(ActionMaker.train_marine())
+                    money -= unit_cost
+            todo.append(temp)
+        return todo
+
+    def arrange(self, s: StateDescriptor) -> Iterable[Any]:
+        if self.n_step == 0:
+            return self.__begin(s)
+        else:
+            return []
+
+
+class WaitForComplete(ActionQueue):
+
+    def __init__(self, unit_type: UnitType):
+        super().__init__()
+        self.__type_to_build = unit_type
+    
+    def __is_being_built(self, s: StateDescriptor):
+        if self.__type_to_build in (BARRACKS, SUPPLY_DEPOT):
+            for u in s.units(self.__type_to_build):
+                if u.build_progress < 100:
+                    return True
+            return False
+        elif self.__type_to_build == SCV:
+            return s.command_center['order_progress_0'] > 0
+        else:
+            for u in s.units(BARRACKS):
+                if u['order_progress_0'] > 0:
+                    return True
+            return False
+
+    def arrange(self, s: StateDescriptor) -> Iterable[Any]:
+        if self.__is_being_built(s):
+            return [ActionMaker.noop()]
+        else:
+            return []
 
 
 N_WORKER = 'n_worker'
@@ -318,10 +403,11 @@ N_MARINE = 'n_marine'
 N_SUPPLY_DEPOT = 'n_supply_depot'
 MONEY = 'money'
 TIMESTEP = 'timestep'
-BUILD_WORKER = 'build_worker'
-BUILD_MARINE = 'build_marine'
-BUILD_BARRACKS = 'build_barracks'
-BUILD_DEPOT = 'build_depot'
+# BUILD_WORKER = 'build_worker'
+# BUILD_MARINE = 'build_marine'
+# BUILD_BARRACKS = 'build_barracks'
+# BUILD_DEPOT = 'build_depot'
+BUILD = 'build'
 INVALID_ACTION = 'invalid_action'
 
 
@@ -329,8 +415,24 @@ NEXT = {s: Env.name_next(s) for s in (
     N_WORKER, N_BARRACKS, N_MARINE, MONEY, N_SUPPLY_DEPOT, TIMESTEP,
 )}
 
-N_EPISODES_RESTART = 8
 
+'''
+def build_task(worker=False, marine=False,
+               barracks=False, depot=False):
+    
+    return TaskQueue(
+        Build(worker, marine, barracks, depot),
+        BackToWork(),
+        Sleep(50),
+    )
+'''
+
+def build_task(build_cls: int):
+    if build_cls == 0:
+        return TaskQueue(BackToWork(), Sleep(30))
+    else:
+        utype = [SCV, MARINE, BARRACKS, SUPPLY_DEPOT][build_cls - 1]
+        return TaskQueue(Build(utype), BackToWork(), Sleep(30), WaitForComplete(utype))
 
 class SC2BuildMarine(Env):
     def __init__(self):
@@ -341,21 +443,21 @@ class SC2BuildMarine(Env):
         _def.state(N_SUPPLY_DEPOT, IntegarNormal(scale=None))
         _def.state(MONEY, IntegarNormal(scale=None))
         _def.state(TIMESTEP, IntegarNormal(scale=None))
-        _def.action(BUILD_WORKER, Boolean())
-        _def.action(BUILD_MARINE, Boolean())
-        _def.action(BUILD_DEPOT, Boolean())
-        _def.action(BUILD_BARRACKS, Boolean())
-        _def.outcome(INVALID_ACTION, Boolean())
+        _def.action(BUILD, NamedCategorical(
+            "none", "worker", "marine", "barracks", "supply depot"))
+        
+        # _def.action(BUILD_WORKER, Binary())
+        # _def.action(BUILD_MARINE, Binary())
+        # _def.action(BUILD_DEPOT, Binary())
+        # _def.action(BUILD_BARRACKS, Binary())
 
         super().__init__(_def)
 
         self.def_reward("new marines", [N_MARINE, NEXT[N_MARINE]],
                         lambda n, n_: n_ - n)
-        self.def_reward("invalid actions", [INVALID_ACTION],
-                        lambda x: -0.5 if x else 0.)
 
         self._pysc2env = self.__make_env()
-        self.__restart_count = 0
+        self.__need_restart = False
 
     def __make_env(self):
         return PySC2Env(map_name="BuildMarines",
@@ -374,15 +476,13 @@ class SC2BuildMarine(Env):
             NEXT[N_SUPPLY_DEPOT]: next_state.n_units(SUPPLY_DEPOT),
             NEXT[MONEY]: next_state.money,
             NEXT[TIMESTEP]: self.__i_step,
-            INVALID_ACTION: self.task_failed
         }
 
     def init_episode(self, *args, **kargs) -> NamedValues:
-        self.__restart_count += 1
-        if self.__restart_count >= N_EPISODES_RESTART:
+        if self.__need_restart:
             self._pysc2env.close()
             self._pysc2env = self.__make_env()
-            self.__restart_count = 0
+            self.__need_restart = False
         
         timestep, = self._pysc2env.reset()
         self.__inner_state = StateDescriptor(timestep)
@@ -393,10 +493,13 @@ class SC2BuildMarine(Env):
         return {s: variables[s_] for s, s_ in self.nametuples_s}
 
     def transit(self, actions: NamedValues) -> Tuple[NamedValues, Any]:
+        task = build_task(actions[BUILD])
+        '''
         task = build_task(actions[BUILD_WORKER],
                           actions[BUILD_MARINE],
                           actions[BUILD_BARRACKS],
                           actions[BUILD_DEPOT])
+        '''
         self.__last_task = task
         s = self.__inner_state
         while True:
@@ -410,6 +513,10 @@ class SC2BuildMarine(Env):
                 break
         
         self.__inner_state = s
+
+        if s.n_units(MINERAL_FIELD) != 8:  # this happens some times...
+            self.__need_restart = True
+
         return self.get_output_variables(self.__inner_state), \
             {"s": self.__inner_state}
 
@@ -422,10 +529,15 @@ class SC2BuildMarine(Env):
         return self.__last_task.n_step
     
     def terminated(self, variables: NamedValues) -> bool:
-        return variables[NEXT[TIMESTEP]] >= 1720
+        return variables[NEXT[TIMESTEP]] >= 1600
+
+    '''
+    def random_action(self) -> NamedValues:
+        return {BUILD_WORKER: np.random.rand() < 0.25,
+                BUILD_MARINE: np.random.rand() < 0.25,
+                BUILD_DEPOT: np.random.rand() < 0.25,
+                BUILD_BARRACKS: np.random.rand() < 0.25}
+    '''
 
     def random_action(self) -> NamedValues:
-        return {BUILD_WORKER: np.random.rand() < 0.5,
-                BUILD_MARINE: np.random.rand() < 0.5,
-                BUILD_DEPOT: np.random.rand() < 0.5,
-                BUILD_BARRACKS: np.random.rand() < 0.5}
+        return {BUILD: random.randint(0, 4)}
