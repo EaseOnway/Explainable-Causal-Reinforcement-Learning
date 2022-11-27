@@ -3,7 +3,7 @@ import gym.envs.box2d.lunar_lander as lunar_lander
 import numpy as np
 
 from core import Env
-from core import ContinuousNormal, ContinuousBeta, \
+from core import ContinuousNormal, TruncatedNormal, \
     Binary, NamedCategorical
 from utils.typings import NamedValues
 
@@ -50,8 +50,8 @@ class LunarLander(Env):
         _def.state(LEG2, Binary())
 
         if self.__continuous:
-            _def.action(MAINENG, ContinuousBeta(low=-1., high=1.))
-            _def.action(LATENG, ContinuousBeta(low=-1., high=1.))
+            _def.action(MAINENG, TruncatedNormal(low=-1., high=1.))
+            _def.action(LATENG, TruncatedNormal(low=-1., high=1.))
         else:
             _def.action(ENG, NamedCategorical('noop', 'left', 'main', 'right'))
 

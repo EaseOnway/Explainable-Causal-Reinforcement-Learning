@@ -1,6 +1,6 @@
 import torch
 
-from envs import SC2BuildMarine
+from envs import LunarLander
 
 import learning
 import numpy as np
@@ -15,19 +15,19 @@ np.set_printoptions(precision=4)
 
 def make_config(model_based: bool):
     config = cfg.Config()
-    config.env = SC2BuildMarine()
+    config.env = LunarLander(continuous=True)
     config.device = torch.device('cuda')
-    config.rl_args.buffer_size = 2048 if model_based else 128
-    config.rl_args.discount = 0.95
-    config.rl_args.gae_lambda = 0.9
+    config.rl_args.buffer_size = 4096
+    config.rl_args.discount = 0.98
+    config.rl_args.gae_lambda = 0.94
     config.rl_args.kl_penalty = 0.1
-    config.rl_args.entropy_penalty = 0.03
-    config.rl_args.optim_args.batchsize = 512
-    config.rl_args.n_epoch_actor = 2 if model_based else 8
-    config.rl_args.n_epoch_critic = 16 if model_based else 64
+    config.rl_args.entropy_penalty = 0.02
+    config.rl_args.optim_args.batchsize = 1024
+    config.rl_args.n_epoch_actor = 2 if model_based else 4
+    config.rl_args.n_epoch_critic = 16 if model_based else 32
     config.rl_args.n_round_model_based = 50
     config.rl_args.optim_args.lr = 1e-4
-    config.causal_args.buffer_size = 100000
+    config.causal_args.buffer_size = 200000
     config.causal_args.pthres_independent = 0.1
     config.causal_args.pthres_likeliratio = 0.1
     config.causal_args.maxlen_truth = 100
@@ -35,8 +35,8 @@ def make_config(model_based: bool):
     config.causal_args.optim_args.lr = 1e-4
     config.causal_args.n_epoch_fit =  50
     config.causal_args.n_epoch_fit_new_graph = 200
-    config.causal_args.optim_args.batchsize = 512
-    config.causal_args.n_true_sample = 128
+    config.causal_args.optim_args.batchsize = 1024
+    config.causal_args.n_true_sample = 1024
     config.causal_args.interval_graph_update = 8
     config.causal_args.n_jobs_fcit = 4
     return config
@@ -46,7 +46,7 @@ def train_model_based(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "model_based", 'verbose')
     trainer.init_run("experiments/SC2BuildMarine/model_based/run-1")
-    trainer.warmup(512, random=True)
+    trainer.warmup(4096, random=True)
     trainer.iter_policy(300, model_based=True)
 
 

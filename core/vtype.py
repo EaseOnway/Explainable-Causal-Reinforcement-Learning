@@ -208,6 +208,28 @@ class ContinuousNormal(ContinuousBase):
         return self.__ptype
 
 
+class TruncatedNormal(ContinuousNormal):
+
+    def __init__(self, low: Any, high: Any, shape: ShapeLike = (), 
+                 scale: Optional[float] = 1.):
+
+        super().__init__(shape, scale)
+        self.__l = torch.tensor(low, dtype=DType.Real.torch)
+        self.__h = torch.tensor(high, dtype=DType.Real.torch)
+    
+    def __get_low_high(self, device: torch.device):
+        if self.__l.device != device:
+            self.__l = self.__l.to(device)
+        if self.__h.device != device:
+            self.__h = self.__h.to(device)
+        return self.__l, self.__h
+    
+    def label2raw(self, batch: torch.Tensor):
+        l, h = self.__get_low_high(batch.device)
+        batch = batch.view(batch.shape[0], *self.shape)
+        return torch.clamp(batch, l, h)
+
+
 class ContinuousBeta(ContinuousBase):
     """Continuous Variables with beta posterior"""
 
