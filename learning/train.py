@@ -3,8 +3,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, final, Tuple
 import numpy as np
 import random
 import torch
-from scipy.stats import chi2
-
+import cmd
 
 import tensorboardX
 from tensorboard.backend.event_processing import event_accumulator
@@ -218,36 +217,6 @@ class Train(Configured):
             self.env.names_inputs + self.env.names_outputs,
             self.__causal_graph, format=format)  # type: ignore
 
-    def __fit_batch(self, transitions: Transitions, eval=False):
-        self.causnet.train(not eval)
-        lls = self.causnet.get_loglikeli_dic(transitions)
-        ll = self.causnet.loglikelihood(lls)
-        loss = -ll
-        if not eval:
-            loss.backward()
-            self.F.optim_step(self.causal_args.optim_args,
-                              self.causnet, self.opt)
-        return float(loss), {k: float(e) for k, e in lls.items()}
-
-    def __fit_epoch(self, log: Log, eval=False):
-        '''
-        train network with fixed causal graph.
-        '''
-        args = self.causal_args.optim_args
-        for batch in self.buffer_m.epoch(args.batchsize):
-            loss, lls = self.__fit_batch(batch, eval)
-            log[_NLL_LOSS] = loss
-            for k, ll in lls.items():
-                log[_LL, k] = ll
-
-    def __show_fit_log(self, log: Log):
-        Log.figure(figsize=(12, 5))  # type: ignore
-        Log.subplot(121, title=_NLL_LOSS)
-        log[_NLL_LOSS].plot(color='k')
-        Log.subplot(122, title=_LL)
-        log[_LL].plots(self.env.names_outputs)
-        Log.show()
-        
     def load(self, path: Optional[str] = None):
         path = path or self.__run_dir + _SAVED_STATE_DICT
         self.load_state_dict(torch.load(path))
@@ -255,11 +224,6 @@ class Train(Configured):
     def save(self, path: Optional[str] = None):
         path = path or self.__run_dir + _SAVED_STATE_DICT
         torch.save(self.state_dict(), path)
-
-    def __eval(self):
-        log = Log()
-        self.__fit_epoch(log, eval=False)
-        return log
     
     def __get_data_for_causal_discovery(self) -> NamedArrays:
        temp = self.buffer_m.tensors[:]
@@ -320,17 +284,59 @@ class Train(Configured):
 
     def warmup(self, n_sample: int, random=False):
         return self.__collect(self.buffer_m, n_sample, random=random)
+
+    def __fit_batch(self, transitions: Transitions, eval=False):
+        lls = self.causnet.get_loglikeli_dic(transitions)
+        ll = self.causnet.loglikelihood(lls)
+        loss = -ll
+        if not eval:
+            loss.backward()
+            self.F.optim_step(self.causal_args.optim_args,
+                              self.causnet, self.opt)
+        return float(loss), {k: float(e) for k, e in lls.items()}
+
+    def __fit_epoch(self, log: Log, eval=False):
+        '''
+        train network with fixed causal graph.
+        '''
+        args = self.causal_args.optim_args
+        for batch in self.buffer_m.epoch(args.batchsize):
+            loss, lls = self.__fit_batch(batch, eval)
+            log[_NLL_LOSS] = loss
+            for k, ll in lls.items():
+                log[_LL, k] = ll
+
+    def __show_fit_log(self, log: Log):
+        Log.figure(figsize=(12, 5))  # type: ignore
+        Log.subplot(121, title=_NLL_LOSS)
+        log[_NLL_LOSS].plot(color='k')
+        Log.subplot(122, title=_LL)
+        log[_LL].plots(self.env.names_outputs)
+        Log.show()
     
-    def fit(self, n_epoch: int):
+    def fit(self, n_batch: int):
         # fit causal equation
         train_log = Log()
-        for i_epoch in range(n_epoch):
-            self.__fit_epoch(train_log, eval=False)
+        batch_size = self.causal_args.optim_args.batchsize
+
+        print(f"start fitting...")
+        self.causnet.train(True)
+        for i_batch in range(n_batch):
+            batch = self.buffer_m.sample_batch(batch_size)
+            nll, loglikelihoods = self.__fit_batch(batch, eval=False)
+            train_log[_NLL_LOSS] = nll
+            for k, ll in loglikelihoods.items():
+                train_log[_LL, k] = ll
+
             if self.show_detail:
-                print(f"fit epoch {i_epoch} done.")
-        
+                interval = n_batch // 20
+                if interval == 0 or (i_batch + 1) % interval == 0:
+                    print(f"batch {i_batch + 1}/{n_batch}: loss = {nll}")
+
         # evaluate
-        eval_log = self.__eval()
+        self.causnet.train(False)
+        eval_log = Log()
+        self.__fit_epoch(eval_log, eval=True)
         
         # show info
         if self.show_loss:
@@ -368,10 +374,9 @@ class Train(Configured):
         if not (self.ablations.graph_fixed or self.ablations.graph_offline) \
                 and i_step % self.causal_args.interval_graph_update == 0:
             _, fit_eval = self.causal_reasoning(
-                self.causal_args.n_epoch_fit_new_graph)
+                self.causal_args.n_batch_fit_new_graph)
         else:
-            # fit causal equation
-            _, fit_eval = self.fit(self.causal_args.n_epoch_fit)
+            _, fit_eval = self.fit(self.causal_args.n_batch_fit)
 
         # planning
         plan_log = Log()

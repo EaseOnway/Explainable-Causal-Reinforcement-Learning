@@ -130,8 +130,8 @@ class CausalArgs(_BaseConfig):
         self.maxlen_dream: Optional[int] = 100
         self.dream_batch_size = 32
         self.n_true_sample = 200
-        self.n_epoch_fit = 10
-        self.n_epoch_fit_new_graph = 50
+        self.n_batch_fit = 50
+        self.n_batch_fit_new_graph = 500
         self.interval_graph_update = 50
         self.optim_args = OptimArgs()
         self.prior = 0.25

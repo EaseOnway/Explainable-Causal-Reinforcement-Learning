@@ -20,7 +20,7 @@ def make_config(model_based: bool):
     config.rl_args.optim_args.batchsize = 512
     config.rl_args.n_epoch_actor = 2 if model_based else 8
     config.rl_args.n_epoch_critic = 16 if model_based else 64
-    config.rl_args.n_round_model_based = 50
+    config.rl_args.n_round_model_based = 25
     config.rl_args.optim_args.lr = 1e-4
     config.causal_args.buffer_size = 100000
     config.causal_args.pthres_independent = 0.1
@@ -28,14 +28,17 @@ def make_config(model_based: bool):
     config.causal_args.maxlen_truth = 100
     config.causal_args.maxlen_dream = 100
     config.causal_args.optim_args.lr = 1e-4
-    config.causal_args.n_epoch_fit =  50
-    config.causal_args.n_epoch_fit_new_graph = 200
+    config.causal_args.n_batch_fit =  128
+    config.causal_args.n_batch_fit_new_graph = 512
     config.causal_args.optim_args.batchsize = 512
     config.causal_args.n_true_sample = 128
-    config.causal_args.interval_graph_update = 8
-    config.causal_args.n_jobs_fcit = 8
+    config.causal_args.interval_graph_update = 16
+    config.causal_args.n_jobs_fcit = 16
 
     return config
+
+
+dir_ = None
 
 
 def train_model_based(_):
