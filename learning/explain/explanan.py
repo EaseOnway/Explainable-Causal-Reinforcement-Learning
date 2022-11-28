@@ -89,7 +89,6 @@ class TrajectoryGenerator:
             return transition
 
 
-
 class Explanan:
     def __init__(self, env: Env, transition: Env.Transition,
                  thres: float, complete=False):

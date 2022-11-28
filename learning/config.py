@@ -68,7 +68,6 @@ class _BaseConfig:
             super().__setattr__(__name, __value)
 
 
-
 class NetDims(_BaseConfig):
     def __init__(self):
         super().__init__()
@@ -121,6 +120,7 @@ class RLArgs(_BaseConfig):
         self.optim_args = OptimArgs()
         self.use_adv_norm = True
         self.use_reward_scaling = True
+
 
 class CausalArgs(_BaseConfig):
     def __init__(self):

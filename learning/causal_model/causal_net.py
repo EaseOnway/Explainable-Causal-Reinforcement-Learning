@@ -40,7 +40,6 @@ class CausalNet(BaseNN):
             self.inferrers[name] = DistributionInferrer(self.v(name), config)
             self.add_module(f'{name}_inferrer', self.inferrers[name])
     
-
     def load_graph(self, parent_dic: Dict[str, Set[str]]):
         self.parent_dic.clear()
         self.parent_dic_s.clear()
@@ -97,4 +96,3 @@ class CausalNet(BaseNN):
             out = out.kapply(self.label2raw)
             out = self.as_numpy(out, drop_batch=True)
         return out
-

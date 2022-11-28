@@ -154,3 +154,6 @@ experiments/
 # config
 *.config.json
 config.json
+
+# vscode
+.vscode/
