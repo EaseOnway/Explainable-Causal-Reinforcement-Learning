@@ -43,11 +43,10 @@ class Inferrer(BaseNN):
             self.layernorm = nn.LayerNorm([dv], **self.torchargs)
 
         self.feed_forward = nn.Sequential(
-            nn.Linear(dv, dv, **self.torchargs),
-            nn.LeakyReLU(),
             nn.Linear(dv, dff, **self.torchargs),
             nn.LeakyReLU(),
-            nn.Linear(dv, dff, **self.torchargs)
+            nn.Linear(dff, dff, **self.torchargs),
+            nn.LeakyReLU(),
         )
 
         self.attn: Tuple[torch.Tensor, torch.Tensor]

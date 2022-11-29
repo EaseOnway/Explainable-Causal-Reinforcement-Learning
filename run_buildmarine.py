@@ -23,17 +23,19 @@ def make_config(model_based: bool):
     config.rl_args.n_round_model_based = 25
     config.rl_args.optim_args.lr = 1e-4
     config.causal_args.buffer_size = 100000
-    config.causal_args.pthres_independent = 0.1
+    config.causal_args.pthres_independent = 0.15
     config.causal_args.pthres_likeliratio = 0.1
     config.causal_args.maxlen_truth = 100
     config.causal_args.maxlen_dream = 100
-    config.causal_args.optim_args.lr = 1e-4
-    config.causal_args.n_batch_fit =  128
-    config.causal_args.n_batch_fit_new_graph = 512
+    config.causal_args.optim_args.lr = 1e-3
+    config.causal_args.optim_args.max_grad_norm = 20
+    config.causal_args.n_batch_fit =  512
+    config.causal_args.n_batch_fit_new_graph = 2048
     config.causal_args.optim_args.batchsize = 512
     config.causal_args.n_true_sample = 128
     config.causal_args.interval_graph_update = 16
     config.causal_args.n_jobs_fcit = 16
+    config.causal_args.n_ensemble = 3 if model_based else 1
 
     return config
 
@@ -45,7 +47,25 @@ def train_model_based(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "model_based", 'verbose')
     trainer.init_run(dir_)
-    trainer.warmup(1024*16, random=True)
+    trainer.warmup(512, random=True)
+    trainer.iter_policy(300, model_based=True)
+
+def temp(_):
+    config = make_config(model_based=True)
+    config.ablations.graph_fixed = True
+    config.causal_args.n_batch_fit = 1024
+    config.causal_args.n_ensemble = 3
+    trainer = learning.Train(config, "fit", 'verbose')
+    trainer.init_run()
+    trainer.causal_graph = {
+        "money'": {"n_worker", "build", "n_marine", "money"},
+        "n_barracks'": {"money", "build", "n_barracks"},
+        "n_marine'": {"build", "n_marine", "n_barracks", "money"},
+        "n_supply_depot'": {"n_supply_depot", "build", "money"},
+        "n_worker'": {"n_worker", "build", "money"},
+        "timestep'": {"build", "timestep"},
+    }
+    trainer.warmup(512, random=True)
     trainer.iter_policy(300, model_based=True)
 
 
@@ -109,6 +129,7 @@ if __name__ == "__main__":
         if args.dir is None:
             raise ValueError("missing argument: '--dir'")
         app.run(explain, ['_'])
+    elif args.command == 'temp':
+        app.run(temp, ['_'])
     else:
         raise NotImplementedError(f"Unkown command: {args.command}")
- 

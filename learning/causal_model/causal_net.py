@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributions as D
+import random
 
 from core import Batch, Distributions, Transitions
 from ..base import BaseNN
@@ -17,11 +18,6 @@ import utils
 
 
 class CausalNet(BaseNN):
-
-    class Ablations:
-        def __init__(self, no_attn=False, recur=False):
-            self.no_attn = no_attn
-            self.recur = recur
 
     def __init__(self, config: Config):
         super().__init__(config)
@@ -97,3 +93,34 @@ class CausalNet(BaseNN):
             out = out.kapply(self.label2raw)
             out = self.as_numpy(out, drop_batch=True)
         return out
+
+
+class CausalNetEnsemble(CausalNet):
+    def __init__(self, config: Config, n: int):
+        BaseNN.__init__(self, config)
+
+        self.__networks: List[CausalNet] = []
+        for i in range(n):
+            self.__networks.append(CausalNet(config))
+        for i, network in enumerate(self.__networks):
+            self.add_module(f"network_{i}", network)
+    
+    def __getitem__(self, i: int):
+        return self.__networks[i]
+    
+    def __len__(self):
+        return len(self.__networks)
+    
+    def __iter__(self):
+        return iter(self.__networks)
+
+    def load_graph(self, parent_dic: Dict[str, Set[str]]):
+        for network in self.__networks:
+            network.load_graph(parent_dic)
+    
+    def get_random_net(self):
+        return random.choice(self.__networks)
+    
+    def forward(self, raw_data: Batch) -> Distributions:
+        net = self.get_random_net()
+        return net.forward(raw_data)

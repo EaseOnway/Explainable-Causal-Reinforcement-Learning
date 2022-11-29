@@ -72,15 +72,15 @@ class NetDims(_BaseConfig):
     def __init__(self):
         super().__init__()
 
-        self.action_encoder_hidden: int = 16
-        self.state_encoder_hidden: int = 16
-        self.action_encoding: int = 16
-        self.state_encoding: int = 16
-        self.inferrer_value: int = 32
-        self.inferrer_key: int = 16
-        self.action_aggregator_hidden: int = 32
-        self.inferrer_feed_forward: int = 32
-        self.decoder_hidden: int = 32
+        self.action_encoder_hidden: int = 64
+        self.state_encoder_hidden: int = 64
+        self.action_encoding: int = 64
+        self.state_encoding: int = 64
+        self.inferrer_value: int = 128
+        self.inferrer_key: int = 64
+        self.action_aggregator_hidden: int = 64
+        self.inferrer_feed_forward: int = 128
+        self.decoder_hidden: int = 128
         self.actor_critic_hidden: int = 64
 
 
@@ -139,6 +139,7 @@ class CausalArgs(_BaseConfig):
         self.pthres_likeliratio = 0.1
         self.adaptive_thres = True
         self.n_jobs_fcit = -1
+        self.n_ensemble = 1
 
 
 class Config(_BaseConfig):

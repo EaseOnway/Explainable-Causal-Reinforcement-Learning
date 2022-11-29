@@ -20,7 +20,7 @@ def make_config(model_based: bool):
     config.rl_args.discount = 0.98
     config.rl_args.gae_lambda = 0.94
     config.rl_args.kl_penalty = 0.1
-    config.rl_args.entropy_penalty = 0.001
+    config.rl_args.entropy_penalty = 0.003
     config.rl_args.optim_args.batchsize = 1024
     config.rl_args.n_epoch_actor = 2 if model_based else 4
     config.rl_args.n_epoch_critic = 16 if model_based else 32
@@ -31,14 +31,15 @@ def make_config(model_based: bool):
     config.causal_args.pthres_likeliratio = 0.1
     config.causal_args.maxlen_truth = 100
     config.causal_args.maxlen_dream = 100
-    config.causal_args.optim_args.lr = 1e-4
-    config.causal_args.n_batch_fit =  128
-    config.causal_args.n_batch_fit_new_graph = 512
+    config.causal_args.optim_args.lr = 1e-3
+    config.causal_args.optim_args.max_grad_norm = 20
+    config.causal_args.n_batch_fit =  256
+    config.causal_args.n_batch_fit_new_graph = 1024
     config.causal_args.optim_args.batchsize = 1024
     config.causal_args.n_true_sample = 1024
     config.causal_args.interval_graph_update = 24
     config.causal_args.n_jobs_fcit = 16
-    config.ablations.graph_fixed = True
+    config.causal_args.n_ensemble = 3 if model_based else 1
     return config
 
 
@@ -49,7 +50,7 @@ def train_model_based(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "model_based", 'verbose')
     trainer.init_run(dir_)
-    trainer.warmup(1024*16, random=True)
+    trainer.warmup(10000, random=True)
     trainer.iter_policy(300, model_based=True)
 
 

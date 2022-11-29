@@ -167,7 +167,23 @@ class Buffer(Configured):
             self.__size = self.__max_size
         else:
             self.__size = size
+    
+    def state_dict(self):
+        return {'data': self.tensors[:],
+                'rewards':  self.rewards[:],
+                'tagcodes': self.tagcodes[:]}
 
+    def load_state_dict(self, state_dict: Dict[str, Any]):
+        transitions = Transitions(state_dict['data'], state_dict['rewards'],
+                                  state_dict['tagcodes'])
+        self.append(transitions)
+    
+    def save(self, path: str):
+        torch.save(self.state_dict(), path)
+    
+    def load(self, path: str):
+        state_dict = torch.load(path)
+        self.load_state_dict(state_dict)
 
 class _TensorGetter:
     def __init__(self, __buffer: 'Buffer'):

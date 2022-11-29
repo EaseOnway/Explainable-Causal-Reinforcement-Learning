@@ -11,7 +11,7 @@ from tensorboard.backend.event_processing import event_accumulator
 from core import Batch, Transitions, Tag
 from .buffer import Buffer
 from .causal_discovery import discover, update
-from .causal_model import CausalNet, CausalModel
+from .causal_model import CausalNet, CausalModel, CausalNetEnsemble
 from .config import Config
 from .base import Configured
 from .planning import PPO
@@ -63,8 +63,11 @@ class Train(Configured):
 
         # causal graph, causal model, and model optimizer
         self.__causal_graph: ParentDict
-        self.causnet = CausalNet(config)
-        self.opt = self.F.get_optmizer(self.causal_args.optim_args, self.causnet)
+        if self.causal_args.n_ensemble <= 1:
+            self.causnet = CausalNet(config)
+        else:
+            self.causnet = CausalNetEnsemble(config, self.causal_args.n_ensemble)
+        self.causopt = self.F.get_optmizer(self.causal_args.optim_args, self.causnet)
 
         # planning algorithm
         self.ppo = PPO(config)
@@ -117,6 +120,7 @@ class Train(Configured):
         initiated = True
         i_step: int = 0
         max_len = self.causal_args.maxlen_truth
+        self.__episodic_return = 0.
 
         for i_sample in range(n_sample):
             # interact with the environment
@@ -135,29 +139,28 @@ class Train(Configured):
             self.__episodic_return += reward
             log[_REWARD] = reward
             if truncated or terminated:
-                initiated = True
-                i_step = 0
                 log[_RETURN] = self.__episodic_return
                 self.__episodic_return = 0.
-            else:
-                initiated = False
-                i_step += 1
 
-            # reset environment
-            if truncated:
-                self.env.reset()
-            
             # truncate the last sample
             if i_sample == n_sample - 1:
                 truncated = True
-
+            
             # write buffer
             tagcode = Tag.encode(terminated, truncated, initiated)
             if self.rl_args.use_reward_scaling:
                 reward = self.__reward_scaling(reward, (truncated or terminated))
-            
             buffer.write(transition.variables, reward, tagcode)
-        
+
+            # reset environment
+            if truncated:
+                self.env.reset()
+            if truncated or terminated:
+                initiated = True
+                i_step = 0
+            else:
+                initiated = False
+
         self.__n_sample += n_sample
         return log
 
@@ -179,7 +182,6 @@ class Train(Configured):
                 a = self.ppo.actor.forward(s).sample().kapply(self.label2raw)
                 tran = env_m.step(a)
             tr.append(tran)
-            i_sample += tran.n
         
         i_sample = 0
         for i in range(batchsize):
@@ -292,7 +294,7 @@ class Train(Configured):
         if not eval:
             loss.backward()
             self.F.optim_step(self.causal_args.optim_args,
-                              self.causnet, self.opt)
+                              self.causnet, self.causopt)
         return float(loss), {k: float(e) for k, e in lls.items()}
 
     def __fit_epoch(self, log: Log, eval=False):

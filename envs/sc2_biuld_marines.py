@@ -437,12 +437,12 @@ def build_task(build_cls: int):
 class SC2BuildMarine(Env):
     def __init__(self):
         _def = Env.Definition()
-        _def.state(N_WORKER, IntegarNormal(scale=0.25))
-        _def.state(N_MARINE, IntegarNormal(scale=0.25))
-        _def.state(N_BARRACKS, IntegarNormal(scale=0.25))
-        _def.state(N_SUPPLY_DEPOT, IntegarNormal(scale=0.25))
-        _def.state(MONEY, IntegarNormal(scale=1))
-        _def.state(TIMESTEP, IntegarNormal(scale=1))
+        _def.state(N_WORKER, IntegarNormal(scale=None))
+        _def.state(N_MARINE, IntegarNormal(scale=None))
+        _def.state(N_BARRACKS, IntegarNormal(scale=None))
+        _def.state(N_SUPPLY_DEPOT, IntegarNormal(scale=None))
+        _def.state(MONEY, IntegarNormal(scale=None))
+        _def.state(TIMESTEP, IntegarNormal(scale=None))
         _def.action(BUILD, NamedCategorical(
             "none", "worker", "marine", "barracks", "supply depot"))
         
