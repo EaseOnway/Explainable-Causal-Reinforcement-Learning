@@ -27,8 +27,8 @@ def make_config(model_based: bool):
     config.causal_args.pthres_likeliratio = 0.1
     config.causal_args.maxlen_truth = 100
     config.causal_args.maxlen_dream = 100
-    config.causal_args.optim_args.lr = 1e-3
-    config.causal_args.optim_args.max_grad_norm = 20
+    config.causal_args.optim_args.lr = 1e-4
+    config.causal_args.optim_args.max_grad_norm = 10
     config.causal_args.n_batch_fit =  512
     config.causal_args.n_batch_fit_new_graph = 2048
     config.causal_args.optim_args.batchsize = 512
