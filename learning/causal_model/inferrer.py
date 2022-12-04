@@ -40,7 +40,8 @@ class Inferrer(BaseNN):
             self.aggregator = Aggregator(da, dk, dh_agg, config)
             self.linear_vs = nn.Linear(ds, dv, **self.torchargs)
             self.linear_va = nn.Linear(dk, dv, **self.torchargs)
-            self.layernorm = nn.LayerNorm([dv], **self.torchargs)
+            self.layernorm = nn.LayerNorm([dv], **self.torchargs,
+                                          elementwise_affine=False)
 
         self.feed_forward = nn.Sequential(
             nn.Linear(dv, dff, **self.torchargs),

@@ -8,6 +8,10 @@ from learning import Explainner
 np.set_printoptions(precision=4)
 
 
+dir_ = None
+ablation = None
+
+
 def make_config(model_based: bool):
     config = cfg.Config()
     config.env = SC2BuildMarine()
@@ -16,7 +20,7 @@ def make_config(model_based: bool):
     config.rl_args.discount = 0.95
     config.rl_args.gae_lambda = 0.9
     config.rl_args.kl_penalty = 0.1
-    config.rl_args.entropy_penalty = 0.03
+    config.rl_args.entropy_penalty = 0.04
     config.rl_args.optim_args.batchsize = 512
     config.rl_args.n_epoch_actor = 2 if model_based else 8
     config.rl_args.n_epoch_critic = 16 if model_based else 64
@@ -31,40 +35,35 @@ def make_config(model_based: bool):
     config.causal_args.optim_args.max_grad_norm = 10
     config.causal_args.n_batch_fit =  512
     config.causal_args.n_batch_fit_new_graph = 2048
-    config.causal_args.optim_args.batchsize = 512
+    config.causal_args.optim_args.batchsize = 1024
     config.causal_args.n_true_sample = 128
-    config.causal_args.interval_graph_update = 16
+    config.causal_args.interval_graph_update = 8
     config.causal_args.n_jobs_fcit = 16
     config.causal_args.n_ensemble = 3 if model_based else 1
 
     return config
 
 
-dir_ = None
-
-
 def train_model_based(_):
     config = make_config(model_based=True)
-    trainer = learning.Train(config, "model_based", 'verbose')
+    
+    if ablation is not None:
+        expname = 'model_based_' + ablation
+    else:
+        expname = 'model_based'
+    
+    if ablation == 'no_attn':
+        config.ablations.no_attn = True
+    elif ablation == 'recur':
+        config.ablations.recur = True
+    elif ablation == 'offline':
+        config.ablations.offline = True
+    elif ablation is not None:
+        raise NotImplementedError("Ablation not supported")
+    
+    
+    trainer = learning.Train(config, expname, 'verbose')
     trainer.init_run(dir_)
-    trainer.warmup(512, random=True)
-    trainer.iter_policy(300, model_based=True)
-
-def temp(_):
-    config = make_config(model_based=True)
-    config.ablations.graph_fixed = True
-    config.causal_args.n_batch_fit = 1024
-    config.causal_args.n_ensemble = 3
-    trainer = learning.Train(config, "fit", 'verbose')
-    trainer.init_run()
-    trainer.causal_graph = {
-        "money'": {"n_worker", "build", "n_marine", "money"},
-        "n_barracks'": {"money", "build", "n_barracks"},
-        "n_marine'": {"build", "n_marine", "n_barracks", "money"},
-        "n_supply_depot'": {"n_supply_depot", "build", "money"},
-        "n_worker'": {"n_worker", "build", "money"},
-        "timestep'": {"build", "timestep"},
-    }
     trainer.warmup(512, random=True)
     trainer.iter_policy(300, model_based=True)
 
@@ -98,7 +97,7 @@ def explain(_):
     a = trainer.env.action_of(tran)
 
     exp.why(trainer.env.state_of(tran), a,
-            mode=True, thres=0.2, maxlen=10)
+            mode=True, thres=0.2, maxlen=10, complete=True)
 
     exp.whynot(trainer.env.state_of(tran), trainer.env.random_action(),
                mode=True, thres=0.15, maxlen=10)
@@ -113,6 +112,7 @@ if __name__ == "__main__":
                         help="'model_based', 'model_free', or 'explain'")
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--dir', type=str, default=None)
+    parser.add_argument('--ablation', type=str, default=None)
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -120,6 +120,9 @@ if __name__ == "__main__":
 
     if args.dir is not None:
         dir_ = args.dir
+    
+    if args.ablation is not None:
+        ablation = args.ablation
 
     if args.command == 'model_based':
         app.run(train_model_based, ['_'])

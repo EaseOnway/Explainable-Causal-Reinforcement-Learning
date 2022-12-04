@@ -373,7 +373,7 @@ class Train(Configured):
         true_return = log_step[_RETURN].mean
 
         # fit causal equation
-        if not (self.ablations.graph_fixed or self.ablations.graph_offline) \
+        if not self.ablations.offline\
                 and i_step % self.causal_args.interval_graph_update == 0:
             _, fit_eval = self.causal_reasoning(
                 self.causal_args.n_batch_fit_new_graph)

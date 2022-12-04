@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set
 import numpy as np
 import torch
 
-from ..causal_model import SimulatedEnv
+from ..causal_model import SimulatedEnv, CausalNetEnsemble
 from ..train import Train
 from utils.typings import NamedValues
 from core import Env
@@ -77,7 +77,13 @@ class TrajectoryGenerator:
                 self.__action = None 
             transition = self.env.step(a)
             self.__terminated = transition.terminated
-            ae = ActionEffect(self.trainer.causnet, a, partial)
+            
+            if isinstance(self.trainer.causnet, CausalNetEnsemble):
+                causnet = self.trainer.causnet.get_random_net()
+            else:
+                causnet = self.trainer.causnet
+            ae = ActionEffect(causnet, a, partial)
+            
             next_causal_weights = self.__update_causal_weights(ae)
             transition.info[_ACTION_EFFECT] = ae
             transition.info[_CAUSAL_WEIGHTS] = self.__causal_weights
@@ -280,7 +286,7 @@ class Explanan:
                 reward_ = other.rewards[label]
                 if abs(reward_ - reward) > eps:
                     lines.append(f"|\t|\t{reward * self.discount} (factual) due to {label}, "
-                                 f"other than {reward_} (counterfactual)")
+                                 f"other than {reward_ * other.discount} (counterfactual)")
 
         if self.terminated:
             lines.append(f"|\tFinally, The  episode terminates.")

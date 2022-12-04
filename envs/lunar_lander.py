@@ -4,7 +4,7 @@ import numpy as np
 
 from core import Env
 from core import ContinuousNormal, TruncatedNormal, \
-    Binary, NamedCategorical
+    Binary, NamedCategorical, Boolean
 from utils.typings import NamedValues
 
 
@@ -46,8 +46,8 @@ class LunarLander(Env):
         _def.state(VY, ContinuousNormal(scale=None))
         _def.state(ANG, ContinuousNormal(scale=None))
         _def.state(V_ANG, ContinuousNormal(scale=None))
-        _def.state(LEG1, Binary())
-        _def.state(LEG2, Binary())
+        _def.state(LEG1, Boolean(scale=None))
+        _def.state(LEG2, Boolean(scale=None))
 
         if self.__continuous:
             _def.action(MAINENG, TruncatedNormal(low=-1., high=1., scale=None))
@@ -55,8 +55,8 @@ class LunarLander(Env):
         else:
             _def.action(ENG, NamedCategorical('noop', 'left', 'main', 'right'))
 
-        _def.outcome(CRASH, Binary())
-        _def.outcome(REST, Binary())
+        _def.outcome(CRASH, Boolean(scale=None))
+        _def.outcome(REST, Boolean(scale=None))
         _def.outcome(FUEL_COST, ContinuousNormal(scale=None))
 
         super().__init__(_def)
