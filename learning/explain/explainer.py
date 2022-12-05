@@ -20,20 +20,17 @@ class Explainner(Configured):
 
     def summarize(self, explanans: Sequence[Explanan]):
         rewards = dict.fromkeys(self.env.rewarders.keys(), 0.)
-        reward_weights = dict.fromkeys(self.env.rewarders.keys(), 0.)
         for e in explanans:
             for k in e.rewards:
                 rewards[k] += e.rewards[k] * e.discount
-                reward_weights[k] += e.reward_weights[k] / len(explanans)
         total_reward = sum(rewards.values())
         
         print(f"In summary, after {len(explanans)} steps, the action at step 0" +
               " would likely cause a return about %.5f, " % total_reward +
               "where")
         for k in rewards:
-            if reward_weights[k] > 0:
-                print(f"|\t{rewards[k]} results from {k} "
-                      f"(average causal weight = {reward_weights[k]})")
+            if rewards[k] != 0:
+                print(f"|\t{rewards[k]} results from {k} ")
 
         if explanans[-1].terminated:
             print(f"Then, the episode terminates.")
@@ -43,8 +40,7 @@ class Explainner(Configured):
             if len(nodes) > 0:
                 print(f"Then, the state becomes")
                 for s in nodes:
-                    print(f"|\t{s} = {e.variables[s]} "
-                          f"(causal weight = {e.weights[s]})")
+                    print(f"|\t{s} = {e.variables[s]} ")
  
     def why(self, state: NamedValues, action: NamedValues,
             maxlen: Optional[int] = None,
@@ -68,7 +64,7 @@ class Explainner(Configured):
             explanans.append(e)
             print(e)
 
-            if e.max_state_weights < thres:
+            if len(e.next_state_nodes) == 0:
                 break
         
         self.summarize(explanans)
@@ -102,7 +98,7 @@ class Explainner(Configured):
             if transition_f is not None:
                 e_f = Explanan(self.env, transition_f, thres, complete)
                 explanans_f.append(e_f)
-                if e_f.max_state_weights < thres:
+                if len(e_f.next_state_nodes) == 0:
                     flag1 = True
             else:
                 flag1 = True
@@ -110,7 +106,7 @@ class Explainner(Configured):
             if transition_cf is not None:
                 e_cf = Explanan(self.env, transition_cf, thres, complete)
                 explanans_cf.append(e_cf)
-                if e_cf.max_state_weights < thres:
+                if len(e_cf.next_state_nodes) == 0:
                     flag2 = True
             else:
                 flag2 = True

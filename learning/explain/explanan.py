@@ -12,7 +12,7 @@ from .action_effect import ActionEffect
 
 
 _ACTION_EFFECT = "__action_effect__"
-_CAUSAL_WEIGHTS = "__causal_weights__"
+_CAUSAL_NODES = "__causal_nodes__"
 _STEP = "__step__"
 _DISCOUNT = "__discount__"
 
@@ -24,19 +24,23 @@ class TrajectoryGenerator:
         self.trainer = trainer
         self.thres = thres
         self.discount = trainer.config.rl_args.discount
+
+        if isinstance(self.trainer.causnet, CausalNetEnsemble):
+            self.causnet = self.trainer.causnet.get_random_net()
+        else:
+            self.causnet = self.trainer.causnet
         
         self.__action: Optional[NamedValues]
-        self.__causal_weights: Dict[str, float]
         self.__terminated: bool
         self.__step: int
         self.__discount: float
 
     def reset(self, state: NamedValues):
-        self.env = SimulatedEnv(self.trainer.causnet, state, self.mode)
+        self.env = SimulatedEnv(self.causnet, state, self.mode)
         self.env.reset()
 
         self.__terminated = False
-        self.__causal_weights = {name: 0. for name in self.env.names_s}
+        self.__causal_nodes: Set[str] = set(self.env.names_s)
         self.__action = None
         self.__step = 0
         self.__discount = 1.0
@@ -44,25 +48,28 @@ class TrajectoryGenerator:
     def intervene(self, action: NamedValues):
         self.__action = action
 
-    def __update_causal_weights(self, ae: ActionEffect):
+    def __update_causal_nodes(self, ae: ActionEffect):
         for name_out in self.env.names_outputs:
-            w = 0.
-            if len(self.env.names_s) == 0 or self.__step == 0:
-                w += ae[name_out]
-            else:
-                w += np.mean([self.__causal_weights[k]
-                             for k in self.env.names_s]) * ae[name_out]
-            for name_in in ae.who_cause(name_out):
-                pre_w = 1. if self.__step == 0 else self.__causal_weights[name_in]
-                w += pre_w * ae[name_in, name_out]
+            flag = False
             
-            if w < self.thres:
-                w = 0.
+            if len(self.env.names_s) == 0 or self.__step == 0:
+                if ae[name_out] >= self.thres:
+                    flag = True
+            else:
+                causal_states = self.__causal_nodes & set(self.env.names_s)
+                if len(causal_states) > 0 and ae[name_out] >= self.thres:
+                    flag = True
+            
+            for name_in in ae.who_cause(name_out):
+                if flag:
+                    break
+                if name_in in self.__causal_nodes and ae[name_in, name_out] >= self.thres:
+                    flag = True
 
-            self.__causal_weights[name_out] = w
+            if flag:
+                self.__causal_nodes.add(name_out)
          
-        new = {s: self.__causal_weights[self.env.name_next(s)]
-               for s in self.env.names_s}
+        new = {s for s, s_ in self.env.nametuples_s if s_ in self.__causal_nodes}
         return new
 
     def step(self):
@@ -78,16 +85,12 @@ class TrajectoryGenerator:
             transition = self.env.step(a)
             self.__terminated = transition.terminated
             
-            if isinstance(self.trainer.causnet, CausalNetEnsemble):
-                causnet = self.trainer.causnet.get_random_net()
-            else:
-                causnet = self.trainer.causnet
-            ae = ActionEffect(causnet, a, partial)
+            ae = ActionEffect(self.causnet, a, partial)
             
-            next_causal_weights = self.__update_causal_weights(ae)
+            next_causal_nodes = self.__update_causal_nodes(ae)
             transition.info[_ACTION_EFFECT] = ae
-            transition.info[_CAUSAL_WEIGHTS] = self.__causal_weights
-            self.__causal_weights = next_causal_weights
+            transition.info[_CAUSAL_NODES] = self.__causal_nodes
+            self.__causal_nodes = next_causal_nodes
             transition.info[_DISCOUNT] = self.__discount
             transition.info[_STEP] = self.__step
             self.__step += 1
@@ -100,9 +103,7 @@ class Explanan:
                  thres: float, complete=False):
         self.__env = env
         self.__ae: ActionEffect = transition.info[_ACTION_EFFECT]
-        self.weights: Dict[str, float] = transition.info[_CAUSAL_WEIGHTS]
-        self.nodes = set(name for name, weight in self.weights.items()
-                            if weight >= thres)
+        self.nodes = transition.info[_CAUSAL_NODES]
 
         self.variables = transition.variables
         self.vartexts = env.texts(transition.variables)
@@ -112,22 +113,16 @@ class Explanan:
         self.terminated = transition.terminated
         self.step: int = transition.info[_STEP]
 
-        self.max_state_weights: float = max(
-            self.weights[k] for k in env.names_next_s)
+        self.next_state_nodes = self.nodes & set(env.names_next_s)
 
-        self.reward_weights: Dict[str, float] = {}
         self.rewards: Dict[str, float] = {}
         self.sources: Dict[str, Set[str]] = {}
         for label, rewarder in env.rewarders.items():
             sources = set(rewarder.source) & self.nodes
             if len(sources) == 0:
                 continue
-            w =  np.mean(
-                [self.weights[node] for node in sources])
-            if w >= thres:
-                self.rewards[label] = rewarder(self.variables)
-                self.sources[label] = sources
-                self.reward_weights[label] = w
+            self.rewards[label] = rewarder(self.variables)
+            self.sources[label] = sources
 
         if complete:
             self.intervals = self.__get_complete_intervals(env)
@@ -167,8 +162,7 @@ class Explanan:
             else:
                 lines.append("|\tdue to the former decisions, states will possibly be")
                 for s in self.interval_states:
-                    lines.append(f"|\t|\t{s} = {self.vartexts[s]} "
-                                  "(causal weight = %.4f)" % self.weights[s])
+                    lines.append(f"|\t|\t{s} = {self.vartexts[s]} ")
 
         if self.step == 0:
             lines.append(f"|\tWe take the given action:")
@@ -180,8 +174,7 @@ class Explanan:
         if len(self.interval_outcomes) > 0:
             lines.append(f"|\tThese will cause the following outcomes:")
             for o in self.interval_outcomes:
-                lines.append(f"|\t|\t{o} = {self.vartexts[o]} "
-                                "(causal weight = %.4f)" % self.weights[o]) 
+                lines.append(f"|\t|\t{o} = {self.vartexts[o]} ") 
 
         if len(self.interval_nextstates) > 0:
             if len(self.interval_outcomes) > 0:
@@ -189,14 +182,12 @@ class Explanan:
             else:
                 lines.append(f"|\tThese will cause the states to possibly transit to")
             for s in self.interval_nextstates:
-                lines.append(f"|\t|\t{s} = {self.vartexts[s]} "
-                                "(causal weight = %.4f)" % self.weights[s])
+                lines.append(f"|\t|\t{s} = {self.vartexts[s]} ")
 
         if len(self.intervals) > 0:
             lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % self.discount)
             for label, reward in self.rewards.items():
-                lines.append(f"|\t|\t{reward * self.discount} due to {label}"
-                                "(causal weight = %.4f)" % self.reward_weights[label])
+                lines.append(f"|\t|\t{reward * self.discount} due to {label}")
 
         if self.terminated:
             lines.append(f"|\tFinally, The episode terminates.")
