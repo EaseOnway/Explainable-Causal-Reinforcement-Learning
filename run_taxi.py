@@ -61,7 +61,6 @@ def train_model_based(_):
     elif ablation is not None:
         raise NotImplementedError("Ablation not supported")
     
-    
     trainer = learning.Train(config, expname, 'verbose')
     trainer.init_run(dir_)
     trainer.warmup(2048, random=True)
@@ -132,7 +131,5 @@ if __name__ == "__main__":
         if args.dir is None:
             raise ValueError("missing argument: '--dir'")
         app.run(explain, ['_'])
-    elif args.command == 'temp':
-        app.run(temp, ['_'])
     else:
         raise NotImplementedError(f"Unkown command: {args.command}")

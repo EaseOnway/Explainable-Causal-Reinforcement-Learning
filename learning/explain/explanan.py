@@ -1,21 +1,332 @@
-from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set
+from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set, List
 
 import numpy as np
 import torch
 
 from ..causal_model import SimulatedEnv, CausalNetEnsemble
 from ..train import Train
-from utils.typings import NamedValues
+from utils.typings import NamedValues, SortedNames
 from core import Env
 
 from .action_effect import ActionEffect
 
 
 _ACTION_EFFECT = "__action_effect__"
-_CAUSAL_NODES = "__causal_nodes__"
-_STEP = "__step__"
-_DISCOUNT = "__discount__"
 
+
+class CausalNode:
+    def __init__(self, name: str, value: Any, t: int, is_reward=False):
+        self.name = name
+        self.value = value
+        self.t = t
+        self.parents: List[CausalNode] = []
+        self.is_reward = is_reward
+        self.in_chain = is_reward
+        self.is_tail = False
+
+    def __back(self):
+        assert self.in_chain
+        for pa in self.parents:
+            if not pa.in_chain:
+                pa.in_chain = True
+                pa.__back()
+    
+    def add_parent(self, node: "CausalNode"):
+        self.parents.append(node)
+        if self.in_chain:
+            if not node.in_chain:
+                node.in_chain = True
+                node.__back()
+        if self.is_reward:
+            node.is_tail = True
+    
+    def __str__(self):
+        return f"{self.name} = {self.value} [t={self.t}, in_chain={self.in_chain}]"
+    
+    def __repr__(self):
+        return str(self)
+
+
+class CausalChain:
+    def __init__(self, env: Env, init_states: NamedValues, thres: float, discount: float):
+        self._variable_nodes: List[Dict[str, CausalNode]] = [dict()]
+        self._reward_nodes: List[Dict[str, CausalNode]] = [dict()]
+        self._transitions: List[Env.Transition] = []
+        self._actions: List[NamedValues] = []
+        self._thres = thres
+        self._env = env
+        self._discount = discount
+        for name, value in init_states.items():
+            self.next_vnodes[name] = CausalNode(name, value, 0)
+    
+    @property
+    def next_vnodes(self):
+        return self._variable_nodes[-1]
+    
+    @property
+    def next_rnodes(self):
+        return self._reward_nodes[-1]
+    
+    @property
+    def t(self):
+        return len(self._transitions)
+    
+    def __len__(self):
+        return len(self._transitions)
+    
+    def step(self, transition: Env.Transition):
+        ae: ActionEffect = transition.info[_ACTION_EFFECT]
+
+        for name_out in self._env.names_o:
+            node = CausalNode(name_out, transition.variables[name_out], self.t)
+            for name_in in self._env.names_s:
+                if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
+                    node.add_parent(self.next_vnodes[name_in])
+            if len(node.parents) > 0:
+                self.next_vnodes[name_out] = node
+
+        next_dict: Dict[str, CausalNode] = {}
+
+        for name_s, name_out in self._env.nametuples_s:
+            node = CausalNode(name_s, transition.variables[name_out], self.t + 1)
+            for name_in in self._env.names_s:
+                if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
+                    node.add_parent(self.next_vnodes[name_in])
+            if len(node.parents) > 0:
+                self.next_vnodes[name_out] = node
+                next_dict[name_s] = node
+
+        for label, rewarder in self._env.rewarders.items():
+            sources = set(rewarder.source) & self.next_vnodes.keys()
+            if len(sources) == 0:
+                continue
+            r = rewarder(transition.variables)
+            node = CausalNode(label, r, self.t, True)
+            for source in sources:
+                node.add_parent(self.next_vnodes[source])
+            self.next_rnodes[label] = node
+        
+        self._actions.append(ae.action)
+        self._transitions.append(transition)
+        self._variable_nodes.append(next_dict)
+        self._reward_nodes.append(dict())
+
+    def __get_intervals(self, t: int, names: SortedNames, complete=True):
+            out: List[CausalNode] = []
+            for name in names:
+                if name in self._variable_nodes[t]:
+                    node = self._variable_nodes[t][name]
+                    if (complete and node.in_chain) or node.is_tail:
+                        out.append(node)
+            return out
+        
+    def __text(self, node: CausalNode):
+        v = self._env.var(node.name)
+        return v.text(node.value)
+
+    def explain(self, t: int, complete=True):
+        lines = []
+        lines.append(f"At step {t}:")
+
+        interval_states = self.__get_intervals(t, self._env.names_s, complete)
+        if len(interval_states) > 0:
+            if t == 0:
+                lines.append("|\twe have states:")
+                for s in interval_states:
+                    lines.append(f"|\t|\t{s.name} = {self.__text(s)}")
+            else:
+                lines.append("|\tdue to the former decisions, states will possibly be")
+                for s in interval_states:
+                    lines.append(f"|\t|\t{s.name} = {self.__text(s)}")
+
+        if self.step == 0:
+            lines.append(f"|\tWe take the given action:")
+        else:
+            lines.append(f"|\tWe will possibly take an action like:")
+        for k, v in self._actions[t].items():
+            lines.append(f"|\t|\t{k} = {self._env.var(k).text(v)}")
+
+        interval_outcomes = self.__get_intervals(t, self._env.names_o, complete)
+        if len(interval_outcomes) > 0:
+            lines.append(f"|\tThese will cause the following outcomes:")
+            for o in interval_outcomes:
+                lines.append(f"|\t|\t{o.name} = {self.__text(o)} ") 
+
+        interval_nextstates = self.__get_intervals(t, self._env.names_next_s, complete)
+        if len(interval_nextstates) > 0:
+            if len(interval_outcomes) > 0:
+                lines.append(f"|\tand states will possibly transit to")
+            else:
+                lines.append(f"|\tThese will cause the states to possibly transit to")
+            for s in interval_nextstates:
+                lines.append(f"|\t|\t{s.name} = {self.__text(s)} ")
+
+        rewards = self._reward_nodes[t]
+        discount = self._discount**t
+        if len(rewards) > 0:
+            lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % discount)
+            for label, reward in rewards.items():
+                lines.append(f"|\t|\t{reward.value * discount} due to {label}")
+
+        if self._transitions[t].terminated:
+            lines.append(f"|\tFinally, The episode terminates.")
+
+        return '\n'.join(lines)
+    
+    def __eq(self, name: str, x1, x2, eps=1e-3):
+        v = self._env.var(name)
+        t1 = v.raw2input(v.tensor(x1, 'cpu').unsqueeze_(0))
+        t2 = v.raw2input(v.tensor(x2, 'cpu').unsqueeze_(0))
+        if torch.norm(t2 - t1) <= eps:
+            return True
+        else:
+            return False
+
+    def __get_vnode(self, t: int, name: str, complete: bool = True):
+        try:
+            node = self._variable_nodes[t][name]
+        except IndexError:
+            return None
+        except KeyError:
+            return None
+        if (complete and node.in_chain) or node.is_tail:
+            return node
+        else:
+            return None
+    
+    def __get_rnode(self, t: int, name: str):
+        try:
+            node = self._reward_nodes[t][name]
+        except IndexError:
+            return None
+        except KeyError:
+            return None
+        return node
+
+    def compare(self, t: int, other: 'CausalChain', eps=1e-3, complete=True):
+
+        def list_variables(names: Iterable[str], n_ind = 2):
+            ind = n_ind * '|\t'
+            lines = []
+
+            for name in names:
+                x = self.__get_vnode(t, name, complete)
+                y = other.__get_vnode(t, name, complete)
+
+                if x is not None and y is None:
+                    lines.append(ind + f"{name} = {self.__text(x)} (factual only)")
+                elif y is not None and x is None:
+                    lines.append(ind + f"{name} = {self.__text(y)} (counterfactual only)")
+                elif x is not None and y is not None:
+                    if not self.__eq(name, x.value, y.value, eps):
+                        lines.append(ind + f"{name} = {self.__text(x)} (factual) other than " +
+                                    f"{self.__text(y)} (counterfactual)")
+
+            return lines
+        
+        def list_rewards(discount: float, n_ind = 2):
+            ind = n_ind * '|\t'
+            lines = []
+
+            for name in self._env.rewarders.keys():
+                x = self.__get_rnode(t, name)
+                y = other.__get_rnode(t, name)
+
+                if x is not None and y is None:
+                    lines.append(ind + f"{x.value * discount} (factual only) due to {name}")
+                elif y is not None and x is None:
+                    lines.append(ind + f"{y.value * discount} (factual only) due to {name}")
+                elif x is not None and y is not None:
+                    if not abs(x.value - y.value) > eps:
+                        lines.append(ind + f"{x.value * discount} (factual) other than " +
+                                     f"{y.value * discount} (counterfactural) due to {name}")
+
+            return lines
+
+        lines = []
+        lines.append(f"At step {t}:")
+
+        # state
+        temp = list_variables(self._env.names_s)
+        if len(temp) > 0:
+            if self.step == 0:
+                lines.append("|\twe have states:")
+                lines.extend(temp)
+            else:
+                lines.append("|\tdue to the former decisions, states will possibly be")
+                lines.extend(temp)
+
+        # action
+        if self.t == 0:
+            lines.append(f"|\tWe take the action:")
+        else:
+            lines.append(f"|\tWe will possibly take an action like:")
+        for name in self._env.names_a:
+            x = self._actions[t][name]
+            y = other._actions[t][name]
+            text_x = self._env.var(name).text(x)
+            text_y = self._env.var(name).text(y)
+            if not self.__eq(name, x, y, eps):
+                lines.append(f"|\t|\t{name} = {text_x} (factual) other than " +
+                            f"{text_y} (counterfactual)")
+            else:
+                lines.append( f"|\t|\t{name} = {text_y}")
+
+        # outcome
+        temp = list_variables(self._env.names_o)
+        flag = len(temp) > 0
+        if flag:
+            lines.append(f"|\tThese will cause the following outcomes:")
+            lines.extend(temp)
+        
+        # next_state
+        temp = list_variables(self._env.names_next_s)
+        if len(temp) > 0:
+            if flag:
+                lines.append(f"|\tand states will possibly transit to")
+            else:
+                lines.append(f"|\tThese will cause the states to possibly transit to")
+            lines.extend(temp)
+
+        discount = self._discount**t
+        temp = list_rewards(discount)
+        if len(temp) > 0:
+            lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % discount)
+            lines.extend(temp)
+
+        if t < len(self) and self._transitions[t].terminated:
+            lines.append(f"|\tThe factural episode terminates.")
+        if t < len(other) and other._transitions[t].terminated:
+            lines.append(f"|\tThe counterfactural episode terminates.")
+
+        return '\n'.join(lines)
+    
+    def summarize(self):
+        rewards = dict.fromkeys(self._env.rewarders.keys(), 0.)
+        for t in range(len(self)):
+            discount = self._discount**t
+            for label, node in self._reward_nodes[t].items():
+                rewards[label] += node.value * discount
+        total_reward = sum(rewards.values())
+        
+        print(f"In summary, after {len(self)} steps, the action at step 0" +
+              " would likely cause a return about %.5f, " % total_reward +
+              "where")
+        for k in rewards:
+            if rewards[k] != 0:
+                print(f"|\t{rewards[k]} results from {k} ")
+
+        if self._transitions[-1].terminated:
+            print(f"Then, the episode terminates.")
+        else:
+            nodes: List[CausalNode] = []
+            for name in self._env.names_next_s:
+                if name in self.next_vnodes:
+                    nodes.append(self.next_vnodes[name])
+            if len(nodes) > 0:
+                print(f"Then, the state becomes")
+                for s in nodes:
+                    print(f"|\t{s.name} = {self.__text(s)} ")
 
 class TrajectoryGenerator:
     def __init__(self, trainer: Train, thres: float, mode=False):
@@ -34,43 +345,21 @@ class TrajectoryGenerator:
         self.__terminated: bool
         self.__step: int
         self.__discount: float
+        self.__causal_chain: CausalChain
 
     def reset(self, state: NamedValues):
         self.env = SimulatedEnv(self.causnet, state, self.mode)
         self.env.reset()
 
         self.__terminated = False
-        self.__causal_nodes: Set[str] = set(self.env.names_s)
         self.__action = None
         self.__step = 0
         self.__discount = 1.0
+        self.__causal_chain = CausalChain(self.trainer.env, 
+            state, self.thres, self.discount)
 
     def intervene(self, action: NamedValues):
         self.__action = action
-
-    def __update_causal_nodes(self, ae: ActionEffect):
-        for name_out in self.env.names_outputs:
-            flag = False
-            
-            if len(self.env.names_s) == 0 or self.__step == 0:
-                if ae[name_out] >= self.thres:
-                    flag = True
-            else:
-                causal_states = self.__causal_nodes & set(self.env.names_s)
-                if len(causal_states) > 0 and ae[name_out] >= self.thres:
-                    flag = True
-            
-            for name_in in ae.who_cause(name_out):
-                if flag:
-                    break
-                if name_in in self.__causal_nodes and ae[name_in, name_out] >= self.thres:
-                    flag = True
-
-            if flag:
-                self.__causal_nodes.add(name_out)
-         
-        new = {s for s, s_ in self.env.nametuples_s if s_ in self.__causal_nodes}
-        return new
 
     def step(self):
         if self.__terminated:
@@ -86,200 +375,12 @@ class TrajectoryGenerator:
             self.__terminated = transition.terminated
             
             ae = ActionEffect(self.causnet, a, partial)
-            
-            next_causal_nodes = self.__update_causal_nodes(ae)
             transition.info[_ACTION_EFFECT] = ae
-            transition.info[_CAUSAL_NODES] = self.__causal_nodes
-            self.__causal_nodes = next_causal_nodes
-            transition.info[_DISCOUNT] = self.__discount
-            transition.info[_STEP] = self.__step
+            self.__causal_chain.step(transition)
             self.__step += 1
             self.__discount *= self.discount
             return transition
 
-
-class Explanan:
-    def __init__(self, env: Env, transition: Env.Transition,
-                 thres: float, complete=False):
-        self.__env = env
-        self.__ae: ActionEffect = transition.info[_ACTION_EFFECT]
-        self.nodes = transition.info[_CAUSAL_NODES]
-
-        self.variables = transition.variables
-        self.vartexts = env.texts(transition.variables)
-        self.action = env.texts(self.__ae.action)
-        self.discount: float = transition.info[_DISCOUNT]
-        self.total_reward = transition.reward
-        self.terminated = transition.terminated
-        self.step: int = transition.info[_STEP]
-
-        self.next_state_nodes = self.nodes & set(env.names_next_s)
-
-        self.rewards: Dict[str, float] = {}
-        self.sources: Dict[str, Set[str]] = {}
-        for label, rewarder in env.rewarders.items():
-            sources = set(rewarder.source) & self.nodes
-            if len(sources) == 0:
-                continue
-            self.rewards[label] = rewarder(self.variables)
-            self.sources[label] = sources
-
-        if complete:
-            self.intervals = self.__get_complete_intervals(env)
-        else:
-            self.intervals = self.__get_minimal_intervals()
-        self.interval_states = self.intervals & set(env.names_s)
-        self.interval_outcomes = self.intervals & set(env.names_o)
-        self.interval_nextstates = self.intervals & set(env.names_next_s)
-
-    def __get_minimal_intervals(self):
-        nodes: Set[str] = set()
-        for source in self.sources.values():
-            nodes = nodes | source
-        return nodes
-
-    def __get_complete_intervals(self, env: Env):
-        minimal_nodes = self.__get_minimal_intervals()
-        supplements: Set[str] = set()
-        for node in env.names_outputs:
-            if node in minimal_nodes:
-                for cau in self.__ae.who_cause(node):
-                    if cau in self.nodes:
-                        supplements.add(cau)
-            if node in self.nodes:
-                supplements.add(node)
-        return minimal_nodes | supplements
-
-    def __str__(self):
-        lines = []
-        lines.append(f"At step {self.step}:")
-
-        if len(self.interval_states) > 0:
-            if self.step == 0:
-                lines.append("|\twe have states:")
-                for s in self.interval_states:
-                    lines.append(f"|\t|\t{s} = {self.vartexts[s]}")
-            else:
-                lines.append("|\tdue to the former decisions, states will possibly be")
-                for s in self.interval_states:
-                    lines.append(f"|\t|\t{s} = {self.vartexts[s]} ")
-
-        if self.step == 0:
-            lines.append(f"|\tWe take the given action:")
-        else:
-            lines.append(f"|\tWe will possibly take an action like:")
-        for k, v in self.action.items():
-            lines.append(f"|\t|\t{k} = {v}")
-
-        if len(self.interval_outcomes) > 0:
-            lines.append(f"|\tThese will cause the following outcomes:")
-            for o in self.interval_outcomes:
-                lines.append(f"|\t|\t{o} = {self.vartexts[o]} ") 
-
-        if len(self.interval_nextstates) > 0:
-            if len(self.interval_outcomes) > 0:
-                lines.append(f"|\tand states will possibly transit to")
-            else:
-                lines.append(f"|\tThese will cause the states to possibly transit to")
-            for s in self.interval_nextstates:
-                lines.append(f"|\t|\t{s} = {self.vartexts[s]} ")
-
-        if len(self.intervals) > 0:
-            lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % self.discount)
-            for label, reward in self.rewards.items():
-                lines.append(f"|\t|\t{reward * self.discount} due to {label}")
-
-        if self.terminated:
-            lines.append(f"|\tFinally, The episode terminates.")
-
-        return '\n'.join(lines)
-    
-    def __eq(self, name: str, x1, x2, eps=1e-3):
-        v = self.__env.var(name)
-        t1 = v.raw2input(v.tensor(x1, 'cpu').unsqueeze_(0))
-        t2 = v.raw2input(v.tensor(x2, 'cpu').unsqueeze_(0))
-        if torch.norm(t2 - t1) <= eps:
-            return True
-        else:
-            return False
-
-    def compare(self, other: 'Explanan', eps=1e-3):
-        if self.step != other.step:
-            raise ValueError("cannot compare explannans at different steps")
-
-        def list_variables(names: Set[str], names_other: Set[str],
-                           n_ind = 2, dif = True):
-            names_x_only = names - names_other
-            names_y_only = names_other - names
-            names_both = names & names_other
-
-            ind = n_ind * '|\t'
-            lines = []
-
-            for name in names_x_only:
-                x = self.vartexts[name]
-                lines.append(ind + f"{name} = {x} (factual only)")
-            
-            for name in names_both:
-                x = self.vartexts[name]
-                y = other.vartexts[name]
-                if not self.__eq(name, self.variables[name],
-                                 other.variables[name], eps):
-                    lines.append(ind + f"{name} = {x} (factual) other than " +
-                                 f"{y} (counterfactual)")
-                elif dif is False:
-                    lines.append(ind + f"{name} = {x}")
-
-            for name in names_y_only:
-                y = other.vartexts[name]
-                lines.append(ind + f"{name} = {y} (counterfactual only)")
-
-            return lines
-            
-        lines = []
-        lines.append(f"At step {self.step}:")
-
-        temp = list_variables(self.interval_states, other.interval_states)
-        if len(temp) > 0:
-            if self.step == 0:
-                lines.append("|\twe have states:")
-                lines.extend(temp)
-            else:
-                lines.append("|\tdue to the former decisions, states will possibly be")
-                lines.extend(temp)
-
-        action_keys = set(self.action.keys())
-        temp = list_variables(action_keys, action_keys, dif=False)
-        if self.step == 0:
-            lines.append(f"|\tWe take the given action:")
-        else:
-            lines.append(f"|\tWe will possibly take an action like:")
-        lines.extend(temp)
-
-        temp = list_variables(self.interval_outcomes, other.interval_outcomes)
-        flag = len(temp) > 0
-        if flag:
-            lines.append(f"|\tThese will cause the following outcomes:")
-            lines.extend(temp)
-        
-        temp = list_variables(self.interval_nextstates,
-                              other.interval_nextstates)
-        if len(temp) > 0:
-            if flag:
-                lines.append(f"|\tand states will possibly transit to")
-            else:
-                lines.append(f"|\tThese will cause the states to possibly transit to")
-            lines.extend(temp)
-
-        if len(self.intervals) > 0:
-            lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % self.discount)
-            for label, reward in self.rewards.items():
-                reward_ = other.rewards[label]
-                if abs(reward_ - reward) > eps:
-                    lines.append(f"|\t|\t{reward * self.discount} (factual) due to {label}, "
-                                 f"other than {reward_ * other.discount} (counterfactual)")
-
-        if self.terminated:
-            lines.append(f"|\tFinally, The  episode terminates.")
-
-        return '\n'.join(lines)
+    @property
+    def causal_chain(self):
+        return self.__causal_chain

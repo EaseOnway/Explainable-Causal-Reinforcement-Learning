@@ -82,15 +82,13 @@ class ActionEffect(Configured):
         self.__causal_weights = causal_weights
         self.__causal_weight_action = causal_weight_action
 
-    def __getitem__(self, key: Union[Edge, str]):
-        if isinstance(key, str):
-            return self.__causal_weight_action[key]
-        else:
-            name_in, name_out = key
-            try:
-                return self.__causal_weights[name_out][name_in]
-            except KeyError:
-                return 0.
+    def __getitem__(self, key: Edge):
+        name_in, name_out = key
+        temp = self.__causal_weight_action[name_out] / self.env.num_s
+        try:
+            return self.__causal_weights[name_out][name_in] + temp
+        except KeyError:
+            return temp
 
     def who_cause(self, name: str):
         return self.__causations[name]

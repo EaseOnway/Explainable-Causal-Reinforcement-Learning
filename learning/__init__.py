@@ -1,2 +1,2 @@
-from .explain import Explainner, Explanan
+from .explain import Explainner
 from .train import Train

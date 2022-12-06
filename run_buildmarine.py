@@ -92,12 +92,12 @@ def explain(_):
     trainer.init_run(dir_, resume=True)
     trainer.plot_causal_graph().view()
     exp = Explainner(trainer)
-    trainer.warmup(15)
-    tran = trainer.buffer_m.arrays[12]
+    trainer.warmup(5)
+    tran = trainer.buffer_m.arrays[3]
     a = trainer.env.action_of(tran)
 
     exp.why(trainer.env.state_of(tran), a,
-            mode=True, thres=0.2, maxlen=10, complete=True)
+            mode=True, thres=0.15, maxlen=10, complete=True)
 
     exp.whynot(trainer.env.state_of(tran), trainer.env.random_action(),
                mode=True, thres=0.15, maxlen=10)
@@ -132,7 +132,5 @@ if __name__ == "__main__":
         if args.dir is None:
             raise ValueError("missing argument: '--dir'")
         app.run(explain, ['_'])
-    elif args.command == 'temp':
-        app.run(temp, ['_'])
     else:
         raise NotImplementedError(f"Unkown command: {args.command}")
