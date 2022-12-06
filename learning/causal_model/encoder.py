@@ -16,12 +16,8 @@ class VariableEncoder(BaseNN):
 
         for var in self.env.names_inputs:
             d_in = self.v(var).size
-            if var in self.env.names_a:
-                d_h = self.dims.action_encoder_hidden
-                d_out = self.dims.action_encoding
-            else:
-                d_h = self.dims.state_encoder_hidden
-                d_out = self.dims.state_encoding
+            d_h = self.dims.variable_encoder_hidden
+            d_out = self.dims.variable_encoding
 
             self.sub_modules[var] = nn.Sequential(
                 nn.Linear(d_in, d_h, **self.torchargs),

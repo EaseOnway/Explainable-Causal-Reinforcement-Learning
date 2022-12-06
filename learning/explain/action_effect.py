@@ -104,7 +104,7 @@ class ActionEffect(Configured):
                 raw = raw.unsqueeze_(0)
                 s = self.raw2input(pa, raw)
                 states.append(self.network.encoder.forward(pa, s))
-            states = self.T.safe_stack(states, (1, self.dims.state_encoding))
+            states = self.T.safe_stack(states, (1, self.dims.variable_encoding))
             inferrer = self.network.inferrers[var]
             temp: torch.Tensor = inferrer.attn_infer(*weight, emb_a, states)
             temp = inferrer.feed_forward(temp)

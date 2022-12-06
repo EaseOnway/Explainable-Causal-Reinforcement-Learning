@@ -28,18 +28,19 @@ class Inferrer(BaseNN):
     def __init__(self, config: Config):
         super().__init__(config)
 
-        da, ds = self.dims.action_encoding, self.dims.state_encoding
+        d = self.dims.variable_encoding
+        d_emb = self.dims.action_influce_embedding
         dv, dk = self.dims.inferrer_value, self.dims.inferrer_key
-        dh_agg = self.dims.action_aggregator_hidden
+        dh_agg = self.dims.aggregator_hidden
         dff = self.dims.inferrer_feed_forward
 
         if config.ablations.recur:
-            d = max(da, ds)
             self.aggregator = Aggregator(d, dv, dh_agg, config)
         else:
-            self.aggregator = Aggregator(da, dk, dh_agg, config)
-            self.linear_vs = nn.Linear(ds, dv, **self.torchargs)
-            self.linear_va = nn.Linear(dk, dv, **self.torchargs)
+            self.aggregator = Aggregator(d, d_emb, dh_agg, config)
+            self.linear_vs = nn.Linear(d, dv, **self.torchargs)
+            self.linear_va = nn.Linear(d_emb, dv, **self.torchargs)
+            self.linear_q = nn.Linear(d_emb, dk, **self.torchargs)
             self.layernorm = nn.LayerNorm([dv], **self.torchargs,
                                           elementwise_affine=False)
 
@@ -61,26 +62,10 @@ class Inferrer(BaseNN):
                     states: torch.Tensor,
                     ):
 
-        da, ds = self.dims.action_encoding, self.dims.state_encoding
         batchsize = actions.shape[1]
         assert states.shape[1] == batchsize
 
-        d = max(da, ds)
-        if da < d:
-            n = actions.shape[0]
-            actions = torch.concat([
-                actions,
-                torch.zeros(n, batchsize, d - da,
-                            requires_grad=False, **self.torchargs)
-            ], dim=2)
-        if ds < d:
-            n = states.shape[0]
-            states = torch.concat([
-                states,
-                torch.zeros(n, batchsize, d - da,
-                            requires_grad=False, **self.torchargs)
-            ], dim=2)
-
+        d = self.dims.variable_encoding
         seq = torch.concat((states, actions), dim=0)
         out = self.aggregator.forward(seq)
 
@@ -89,7 +74,7 @@ class Inferrer(BaseNN):
     def get_attn_scores(self, emb_a: torch.Tensor, kstates: torch.Tensor):
         num_state, _ = kstates.shape
         kstates = kstates.unsqueeze(dim=1)  # num_state * 1 *dim_k
-        q = emb_a  # batch * dim_k
+        q = self.linear_q(emb_a)  # batch * dim_k
         scores: torch.Tensor = torch.sum(
             kstates * q, dim=2) / np.sqrt(self.dims.inferrer_key)  # num_state * batch
         expscores = torch.exp(scores)
@@ -141,9 +126,9 @@ class Inferrer(BaseNN):
         T = self.T
         dims = self.dims
         actions = T.safe_stack([encoded_data[k] for k in action_keys],
-                               (encoded_data.n, dims.action_encoding))
+                               (encoded_data.n, dims.variable_encoding))
         states = T.safe_stack([encoded_data[k] for k in sorted(state_keys)],
-                              (encoded_data.n, dims.state_encoding))
+                              (encoded_data.n, dims.variable_encoding))
         kstates = key_model.forward(state_keys)
         return actions, kstates, states
 

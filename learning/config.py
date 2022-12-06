@@ -72,13 +72,12 @@ class NetDims(_BaseConfig):
     def __init__(self):
         super().__init__()
 
-        self.action_encoder_hidden: int = 64
-        self.state_encoder_hidden: int = 64
-        self.action_encoding: int = 64
-        self.state_encoding: int = 64
+        self.variable_encoding: int = 64
+        self.variable_encoder_hidden: int = 64
+        self.action_influce_embedding: int = 128
+        self.aggregator_hidden: int = 64
         self.inferrer_value: int = 128
         self.inferrer_key: int = 64
-        self.action_aggregator_hidden: int = 64
         self.inferrer_feed_forward: int = 128
         self.decoder_hidden: int = 128
         self.actor_critic_hidden: int = 64
