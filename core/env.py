@@ -246,3 +246,7 @@ class Env(abc.ABC):
     def texts(self, variables: NamedValues):
         return {k: self.__vtypes[k].text(v)
                 for k, v in variables.items()}
+
+    def get_full_graph(self):
+        return {name_out: set(self.names_inputs)
+                for name_out in self.names_outputs}

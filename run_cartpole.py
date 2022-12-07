@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from envs import Taxi
+from envs import Cartpole
 import learning
 import learning.config as cfg
 from learning import Explainner
@@ -14,7 +14,7 @@ ablation = None
 
 def make_config(model_based: bool):
     config = cfg.Config()
-    config.env = Taxi()
+    config.env = Cartpole()
     config.device = torch.device('cuda')
     config.rl_args.buffer_size = 2048
     config.rl_args.discount = 0.95

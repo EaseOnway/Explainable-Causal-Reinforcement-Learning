@@ -12,6 +12,10 @@ from learning import Explainner
 np.set_printoptions(precision=4)
 
 
+dir_ = None
+ablation = None
+
+
 def make_config(model_based: bool):
     config = cfg.Config()
     config.env = LunarLander(continuous=True)
@@ -20,7 +24,7 @@ def make_config(model_based: bool):
     config.rl_args.discount = 0.98
     config.rl_args.gae_lambda = 0.94
     config.rl_args.kl_penalty = 0.1
-    config.rl_args.entropy_penalty = 0.005
+    config.rl_args.entropy_penalty = 0.002
     config.rl_args.optim_args.batchsize = 1024
     config.rl_args.n_epoch_actor = 2 if model_based else 4
     config.rl_args.n_epoch_critic = 16 if model_based else 32
@@ -39,18 +43,39 @@ def make_config(model_based: bool):
     config.causal_args.n_true_sample = 1024
     config.causal_args.interval_graph_update = 20
     config.causal_args.n_jobs_fcit = 16
-    config.causal_args.n_ensemble = 3 if model_based else 1
+    config.causal_args.n_ensemble = 1 if model_based else 1
     return config
 
 
-dir_ = None
-
+def train_temp(_):
+    config = make_config(model_based=True)
+    config.ablations.offline = True
+    trainer = learning.Train(config, 'temp', 'verbose')
+    trainer.init_run(dir_)
+    trainer.warmup(2048, random=True)
+    trainer.causal_graph = config.env.get_full_graph()
+    trainer.iter_policy(300, model_based=True)
 
 def train_model_based(_):
     config = make_config(model_based=True)
-    trainer = learning.Train(config, "model_based", 'verbose')
+    
+    if ablation is not None:
+        expname = 'model_based_' + ablation
+    else:
+        expname = 'model_based'
+    
+    if ablation == 'no_attn':
+        config.ablations.no_attn = True
+    elif ablation == 'recur':
+        config.ablations.recur = True
+    elif ablation == 'offline':
+        config.ablations.offline = True
+    elif ablation is not None:
+        raise NotImplementedError("Ablation not supported")
+    
+    trainer = learning.Train(config, expname, 'verbose')
     trainer.init_run(dir_)
-    trainer.warmup(10000, random=True)
+    trainer.warmup(2048, random=True)
     trainer.iter_policy(300, model_based=True)
 
 
@@ -66,8 +91,8 @@ def causal_resoning(_):
     config = make_config(model_based=True)
     trainer = learning.Train(config, "test", 'plot')
     trainer.init_run(dir_, resume=True)
-    trainer.warmup(10000, random=True)
-    trainer.warmup(50000)
+    trainer.warmup(1000, random=True)
+    trainer.warmup(2000)
     trainer.causal_reasoning(300)
     trainer.save()
 
@@ -78,15 +103,14 @@ def explain(_):
     trainer.init_run(dir_, resume=True)
     trainer.plot_causal_graph().view()
     exp = Explainner(trainer)
-    trainer.warmup(15)
-    tran = trainer.buffer_m.arrays[12]
+    trainer.warmup(50)
+    tran = trainer.buffer_m.arrays[30]
     a = trainer.env.action_of(tran)
 
     exp.why(trainer.env.state_of(tran), a,
-            mode=True, thres=0.2, maxlen=10)
+            mode=True, thres=0.15, maxlen=10, complete=True)
 
-    exp.whynot(trainer.env.state_of(tran),
-               trainer.env.random_action(),
+    exp.whynot(trainer.env.state_of(tran), trainer.env.random_action(),
                mode=True, thres=0.15, maxlen=10)
 
 
@@ -99,6 +123,7 @@ if __name__ == "__main__":
                         help="'model_based', 'model_free', or 'explain'")
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--dir', type=str, default=None)
+    parser.add_argument('--ablation', type=str, default=None)
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -106,6 +131,9 @@ if __name__ == "__main__":
 
     if args.dir is not None:
         dir_ = args.dir
+    
+    if args.ablation is not None:
+        ablation = args.ablation
 
     if args.command == 'model_based':
         app.run(train_model_based, ['_'])
@@ -115,5 +143,7 @@ if __name__ == "__main__":
         if args.dir is None:
             raise ValueError("missing argument: '--dir'")
         app.run(explain, ['_'])
+    elif args.command == 'temp':
+        app.run(train_temp, ['_'])
     else:
         raise NotImplementedError(f"Unkown command: {args.command}")

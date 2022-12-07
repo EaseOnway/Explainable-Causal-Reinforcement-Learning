@@ -44,6 +44,9 @@ def make_config(model_based: bool):
     return config
 
 
+def train_temp(_):
+    pass
+
 def train_model_based(_):
     config = make_config(model_based=True)
     
@@ -132,5 +135,7 @@ if __name__ == "__main__":
         if args.dir is None:
             raise ValueError("missing argument: '--dir'")
         app.run(explain, ['_'])
+    elif args.command == 'temp':
+        app.run(train_temp, ['_'])
     else:
         raise NotImplementedError(f"Unkown command: {args.command}")
