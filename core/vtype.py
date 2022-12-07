@@ -208,14 +208,19 @@ class ContinuousNormal(ContinuousBase):
         return self.__ptype
 
 
-class TruncatedNormal(ContinuousNormal):
+class TruncatedNormal(ContinuousBase):
 
     def __init__(self, low: Any, high: Any, shape: ShapeLike = (), 
                  scale: Optional[float] = 1.):
 
-        super().__init__(shape, scale)
+        super().__init__(shape)
         self.__l = torch.tensor(low, dtype=DType.Real.torch)
         self.__h = torch.tensor(high, dtype=DType.Real.torch)
+        self.__ptype = ptype.TanhNormal(self.size, scale, (self.__l, self.__h))
+    
+    @property
+    def ptype(self) -> ptype.PType:
+        return self.__ptype
     
     def __get_low_high(self, device: torch.device):
         if self.__l.device != device:

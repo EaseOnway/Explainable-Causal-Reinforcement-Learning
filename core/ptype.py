@@ -46,6 +46,30 @@ class Normal(PType):
         return D.Normal(mean, _scale)
 
 
+class TanhNormal(Normal):
+    def __init__(self, dim: int, scale: Optional[float] = 1.0,
+                 _range: Optional[Tuple[Any, Any]] = None):
+        super().__init__(dim, scale)
+        
+        self.scale = scale
+
+        self._ranged = False
+        if _range is not None:
+            self._ranged = True
+            low = torch.tensor(_range[0], dtype=torch.float)
+            high = torch.tensor(_range[1], dtype=torch.float)
+            self._rad = (high - low)/ 2
+            self._mid = (high + low)/ 2
+
+    def __call__(self, mean: Tensor, scale: Optional[Tensor] = None):
+        mean = torch.tanh(mean)
+        if self._ranged:
+            self._rad = self._rad.to(mean.device, mean.dtype)
+            self._mid = self._mid.to(mean.device, mean.dtype)
+            mean = self._mid + mean * self._rad
+        return super().__call__(mean, scale)
+
+
 class Categorical(PType):
     def __init__(self, k: int):
         super().__init__(weights=k)

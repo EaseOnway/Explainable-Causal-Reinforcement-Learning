@@ -1,5 +1,5 @@
 from .vtype import VType, DType, ContinuousNormal, Categorical, \
-    Binary, Boolean, ContinuousBeta, NamedCategorical, IntegarNormal, \
+    Binary, Boolean, NamedCategorical, IntegarNormal, \
     TruncatedNormal
 from .env import Env
 from .mdp import CausalMdp
