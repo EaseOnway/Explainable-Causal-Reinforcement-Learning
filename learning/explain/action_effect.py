@@ -54,7 +54,7 @@ class ActionEffect(Configured):
                 parents_a = network.parent_dic_a[var]
                 parents_s = network.parent_dic_s[var]
                 actions_pa = self.T.safe_stack([action_enc[pa] for pa in parents_a],
-                                               (1, self.config.dims.action_encoding))
+                                               (1, self.config.dims.variable_encoding))
                 inferrer = self.network.inferrers[var]
                 a_emb = inferrer.aggregator.forward(actions_pa)
                 kstates = self.network.k_model.forward(parents_s)
@@ -82,13 +82,15 @@ class ActionEffect(Configured):
         self.__causal_weights = causal_weights
         self.__causal_weight_action = causal_weight_action
 
-    def __getitem__(self, key: Edge):
-        name_in, name_out = key
-        temp = self.__causal_weight_action[name_out] / self.env.num_s
-        try:
-            return self.__causal_weights[name_out][name_in] + temp
-        except KeyError:
-            return temp
+    def __getitem__(self, key: Union[Edge, str]):
+        if isinstance(key, str):
+            return self.__causal_weight_action[key]
+        else:
+            name_in, name_out = key
+            try:
+                return self.__causal_weights[name_out][name_in]
+            except KeyError:
+                return 0.
 
     def who_cause(self, name: str):
         return self.__causations[name]

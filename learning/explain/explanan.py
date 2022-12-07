@@ -79,20 +79,24 @@ class CausalChain:
 
         for name_out in self._env.names_o:
             node = CausalNode(name_out, transition.variables[name_out], self.t)
-            for name_in in self._env.names_s:
+            flag = ae[name_out] >= self._thres
+            for name_in in ae.who_cause(name_out):
                 if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
                     node.add_parent(self.next_vnodes[name_in])
-            if len(node.parents) > 0:
+                    flag = True
+            if flag:
                 self.next_vnodes[name_out] = node
 
         next_dict: Dict[str, CausalNode] = {}
 
         for name_s, name_out in self._env.nametuples_s:
             node = CausalNode(name_s, transition.variables[name_out], self.t + 1)
+            flag = ae[name_out] >= self._thres
             for name_in in self._env.names_s:
                 if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
                     node.add_parent(self.next_vnodes[name_in])
-            if len(node.parents) > 0:
+                    flag = True
+            if flag:
                 self.next_vnodes[name_out] = node
                 next_dict[name_s] = node
 
