@@ -105,12 +105,14 @@ class Train(Configured):
                 _CAUSAL_GRAPH: self.__causal_graph,
                 _REWARD_SCALING: self.__reward_scaling.state_dict()}
     
-    def load_state_dict(self, dic: Dict[str, Any]):
-        self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
-        self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
-        self.causnet.load_state_dict(dic[_CAUSAL_NET])
+    def load_state_dict(self, dic: Dict[str, Any], policy=True, model=True):
+        if policy:
+            self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
+            self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
+        if model:
+            self.causnet.load_state_dict(dic[_CAUSAL_NET])
+            self.causal_graph = dic[_CAUSAL_GRAPH]
         self.__reward_scaling.load_state_dict(dic[_REWARD_SCALING])
-        self.causal_graph = dic[_CAUSAL_GRAPH]
 
     def __collect(self, buffer: Buffer, n_sample: int, random = False):
         '''collect real-world samples into the buffer, and compute returns'''
@@ -219,9 +221,9 @@ class Train(Configured):
             self.env.names_inputs + self.env.names_outputs,
             self.__causal_graph, format=format)  # type: ignore
 
-    def load(self, path: Optional[str] = None):
+    def load(self, path: Optional[str] = None, policy=True, model=True):
         path = path or self.__run_dir + _SAVED_STATE_DICT
-        self.load_state_dict(torch.load(path))
+        self.load_state_dict(torch.load(path), policy, model)
 
     def save(self, path: Optional[str] = None):
         path = path or self.__run_dir + _SAVED_STATE_DICT

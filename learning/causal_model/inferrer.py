@@ -95,13 +95,14 @@ class Inferrer(BaseNN):
 
         vs: torch.Tensor = self.linear_vs(states)  # num_states * batch * dim_v
         va: torch.Tensor = self.linear_va(emb_a)   # batch * dim_v
-
         v = torch.cat((vs, va.unsqueeze(0)), dim=0)  # (num_states + 1) * batch * dim_v
-        v: torch.Tensor = self.layernorm(v)
+        
         a = torch.cat((attn_s, attn_a.unsqueeze(0)), dim=0)  # (num_states + 1) * batch
         a = a.view((num_state + 1), batch_size, 1)
-          
-        return torch.sum(v * a, dim=0)  # batch * dim_v
+        
+        v = torch.sum(v * a, dim=0)
+        v: torch.Tensor = self.layernorm(v)
+        return v  # batch * dim_v
 
     def __attn_infer(self, actions: torch.Tensor, kstates: torch.Tensor,
                      states: torch.Tensor):
