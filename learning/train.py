@@ -34,6 +34,7 @@ _CAUSAL_NET = 'causal.net'
 _REWARD_SCALING = 'reward_scaling'
 _SAVED_STATE_DICT = 'saved_state_dict'
 _SAVED_CONFIG = 'config.txt'
+_SAVED_BUFFER = 'buffer'
 _RETURN = 'return'
 
 
@@ -88,6 +89,10 @@ class Train(Configured):
         self.__writer: tensorboardX.SummaryWriter
     
     @property
+    def run_dir(self):
+        return self.__run_dir
+    
+    @property
     @final
     def causal_graph(self):
         return self.__causal_graph
@@ -97,24 +102,8 @@ class Train(Configured):
     def causal_graph(self, graph: ParentDict):
         self.__causal_graph = graph
         self.causnet.load_graph(self.__causal_graph)
-    
-    def state_dict(self):
-        return {_PPO_ACTOR: self.ppo.actor.state_dict(),
-                _PPO_CRITIC: self.ppo.critic.state_dict(),
-                _CAUSAL_NET: self.causnet.state_dict(),
-                _CAUSAL_GRAPH: self.__causal_graph,
-                _REWARD_SCALING: self.__reward_scaling.state_dict()}
-    
-    def load_state_dict(self, dic: Dict[str, Any], policy=True, model=True):
-        if policy:
-            self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
-            self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
-        if model:
-            self.causnet.load_state_dict(dic[_CAUSAL_NET])
-            self.causal_graph = dic[_CAUSAL_GRAPH]
-        self.__reward_scaling.load_state_dict(dic[_REWARD_SCALING])
 
-    def __collect(self, buffer: Buffer, n_sample: int, random = False):
+    def collect(self, buffer: Buffer, n_sample: int, random = False):
         '''collect real-world samples into the buffer, and compute returns'''
 
         log = Log()
@@ -221,13 +210,37 @@ class Train(Configured):
             self.env.names_inputs + self.env.names_outputs,
             self.__causal_graph, format=format)  # type: ignore
 
-    def load(self, path: Optional[str] = None, policy=True, model=True):
-        path = path or self.__run_dir + _SAVED_STATE_DICT
-        self.load_state_dict(torch.load(path), policy, model)
+    def state_dict(self):
+        return {_PPO_ACTOR: self.ppo.actor.state_dict(),
+                _PPO_CRITIC: self.ppo.critic.state_dict(),
+                _CAUSAL_NET: self.causnet.state_dict(),
+                _CAUSAL_GRAPH: self.__causal_graph,
+                _REWARD_SCALING: self.__reward_scaling.state_dict()}
+    
+    def load_state_dict(self, dic: Dict[str, Any], policy=True, model=True):
+        if policy:
+            self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
+            self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
+        if model:
+            self.causnet.load_state_dict(dic[_CAUSAL_NET])
+            self.causal_graph = dic[_CAUSAL_GRAPH]
+        self.__reward_scaling.load_state_dict(dic[_REWARD_SCALING])
 
-    def save(self, path: Optional[str] = None):
-        path = path or self.__run_dir + _SAVED_STATE_DICT
-        torch.save(self.state_dict(), path)
+    def load(self, path: Optional[str] = None, policy=True, model=True, buffer=False):
+        temp = path or self.__run_dir + _SAVED_STATE_DICT
+        self.load_state_dict(torch.load(temp), policy, model)
+        
+        if buffer:
+            temp = path or self.__run_dir + _SAVED_BUFFER
+            self.buffer_m.load(temp)
+
+    def save(self, path: Optional[str] = None, buffer=False):
+        temp = path or self.__run_dir + _SAVED_STATE_DICT
+        torch.save(self.state_dict(), temp)
+
+        if buffer:
+            temp = path or self.__run_dir + _SAVED_BUFFER
+            self.buffer_m.save(temp)
     
     def __get_data_for_causal_discovery(self) -> NamedArrays:
        temp = self.buffer_m.tensors[:]
@@ -287,7 +300,7 @@ class Train(Configured):
         self.buffer_p.clear()
 
     def warmup(self, n_sample: int, random=False):
-        return self.__collect(self.buffer_m, n_sample, random=random)
+        return self.collect(self.buffer_m, n_sample, random=random)
 
     def __fit_batch(self, transitions: Transitions, eval=False):
         lls = self.causnet.get_loglikeli_dic(transitions)
@@ -353,14 +366,17 @@ class Train(Configured):
         
         return train_log, eval_log
 
-    def causal_reasoning(self, n_epoch: int):
+    def causal_reasoning(self, n_batch: int):
         # causal discovery
-        data = self.__get_data_for_causal_discovery()
-        self.causal_graph = discover(data, self.env,
-                                     self.causal_args.pthres_independent,
-                                     self.show_detail,
-                                     self.causal_args.n_jobs_fcit)
-        train_log, eval_log = self.fit(n_epoch)
+        if self.config.ablations.dense:
+            self.causal_graph = self.env.get_full_graph()
+        else:
+            data = self.__get_data_for_causal_discovery()
+            self.causal_graph = discover(data, self.env,
+                                        self.causal_args.pthres_independent,
+                                        self.show_detail,
+                                        self.causal_args.n_jobs_fcit)
+        train_log, eval_log = self.fit(n_batch)
         
         # save
         self.save()
@@ -370,7 +386,7 @@ class Train(Configured):
 
     def __step_policy_model_based(self, i_step: int):
         # collect true samples
-        log_step = self.__collect(self.buffer_m, self.causal_args.n_true_sample)
+        log_step = self.collect(self.buffer_m, self.causal_args.n_true_sample)
         true_reward = log_step[_REWARD].mean
         true_return = log_step[_RETURN].mean
 
@@ -431,7 +447,7 @@ class Train(Configured):
     def __step_policy_model_free(self, i_step: int):
         # collect samples
         self.buffer_p.clear()
-        log = self.__collect(self.buffer_p, self.buffer_p.max_size)
+        log = self.collect(self.buffer_p, self.buffer_p.max_size)
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
         self.buffer_m.append(

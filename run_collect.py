@@ -1,15 +1,17 @@
+from typing import Optional
+
 import torch
 import numpy as np
 from envs import SC2Collect
 import learning
 import learning.config as cfg
+
 from learning import Explainner
+from absl import app
+from argparse import ArgumentParser
+
 
 np.set_printoptions(precision=4)
-
-
-dir_ = None
-ablation = None
 
 
 def make_config(model_based: bool):
@@ -39,12 +41,19 @@ def make_config(model_based: bool):
     config.causal_args.n_true_sample = 80
     config.causal_args.interval_graph_update = 8
     config.causal_args.n_jobs_fcit = 16
-    config.causal_args.n_ensemble = 3 if model_based else 1
+    config.causal_args.n_ensemble = 1 if model_based else 1
 
     return config
 
 
 def train_temp(_):
+    d = "E:\\OneDrive\\工作\\experiments\\run-2"
+    config = make_config(model_based=True)
+    config.ablations.offline = True
+    trainer = learning.Train(config, "temp", 'verbose')
+    trainer.init_run(d, resume=True)
+    # trainer.warmup(512, random=True)
+    trainer.iter_policy(300, model_based=True)
     train_model_based(_)
 
 def train_model_based(_):
@@ -61,6 +70,9 @@ def train_model_based(_):
         config.ablations.recur = True
     elif ablation == 'offline':
         config.ablations.offline = True
+    elif ablation == 'not_causal':
+        config.ablations.offline = True
+        config.causal_args.prior = 1.0
     elif ablation is not None:
         raise NotImplementedError("Ablation not supported")
     
@@ -76,7 +88,7 @@ def train_model_free(_):
     trainer = learning.Train(config, "model_free", 'verbose')
     trainer.init_run(dir_)
     trainer.iter_policy(300, model_based=False)
-    trainer.causal_reasoning(300)
+    
 
 
 def causal_resoning(_):

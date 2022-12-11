@@ -4,57 +4,35 @@ from envs import SC2BuildMarine
 import learning
 import learning.config as cfg
 from learning import Explainner
+from configs import make_config
 
 np.set_printoptions(precision=4)
 
 
-dir_ = None
-ablation = None
-
-
-def make_config(model_based: bool):
-    config = cfg.Config()
-    config.env = SC2BuildMarine()
-    config.device = torch.device('cuda')
-    config.rl_args.buffer_size = 2048 if model_based else 80
-    config.rl_args.discount = 0.95
-    config.rl_args.gae_lambda = 0.9
-    config.rl_args.kl_penalty = 0.1
-    config.rl_args.entropy_penalty = 0.04
-    config.rl_args.optim_args.batchsize = 512
-    config.rl_args.n_epoch_actor = 2 if model_based else 8
-    config.rl_args.n_epoch_critic = 16 if model_based else 64
-    config.rl_args.n_round_model_based = 25
-    config.rl_args.optim_args.lr = 1e-4
-    config.causal_args.buffer_size = 100000
-    config.causal_args.pthres_independent = 0.15
-    config.causal_args.pthres_likeliratio = 0.1
-    config.causal_args.maxlen_truth = 100
-    config.causal_args.maxlen_dream = 100
-    config.causal_args.optim_args.lr = 1e-4
-    config.causal_args.optim_args.max_grad_norm = 10
-    config.causal_args.n_batch_fit =  256 * 3
-    config.causal_args.n_batch_fit_new_graph = 1024 * 3
-    config.causal_args.optim_args.batchsize = 1024
-    config.causal_args.n_true_sample = 80
-    config.causal_args.interval_graph_update = 8
-    config.causal_args.n_jobs_fcit = 16
-    config.causal_args.n_ensemble = 3 if model_based else 1
-
-    return config
-
-
 def train_temp(_):
-    pass
+    config = make_config(args.env, False)
+    config.saliency.sparse_factor = 0.005
+    trainer = learning.Train(config, "model_free", 'verbose')
+    trainer.init_run(r"experiments\Cartpole\model_free\run-7", resume=True)
+    # trainer.iter_policy(100, model_based=False)
+    
+    from learning.baselines.saliency.explainer import SaliencyExplainner
+    exp = SaliencyExplainner(trainer)
+    exp.train(10)
+    
+    trainer.warmup(5)
+    tran = trainer.buffer_m.arrays[3]
+    a = trainer.env.action_of(tran)
+    exp.why(trainer.env.state_of(tran), a)
 
 def train_model_based(_):
-    config = make_config(model_based=True)
+    config = make_config(args.env, True)
     
+    ablation = args.ablation
     if ablation is not None:
         expname = 'model_based_' + ablation
     else:
         expname = 'model_based'
-    
     if ablation == 'no_attn':
         config.ablations.no_attn = True
     elif ablation == 'recur':
@@ -64,25 +42,24 @@ def train_model_based(_):
     elif ablation is not None:
         raise NotImplementedError("Ablation not supported")
     
-    
     trainer = learning.Train(config, expname, 'verbose')
-    trainer.init_run(dir_)
+    trainer.init_run(args.dir)
     trainer.warmup(512, random=True)
     trainer.iter_policy(300, model_based=True)
 
 
 def train_model_free(_):
-    config = make_config(model_based=False)
+    config = make_config(args.env, False)
     trainer = learning.Train(config, "model_free", 'verbose')
-    trainer.init_run(dir_)
+    trainer.init_run(args.dir)
     trainer.iter_policy(300, model_based=False)
     trainer.causal_reasoning(300)
 
 
 def causal_resoning(_):
-    config = make_config(model_based=True)
+    config = make_config(args.env, model_based=True)
     trainer = learning.Train(config, "test", 'plot')
-    trainer.init_run(dir_, resume=True)
+    trainer.init_run(args.dir, resume=True)
     trainer.warmup(1000, random=True)
     trainer.warmup(2000)
     trainer.causal_reasoning(300)
@@ -90,9 +67,9 @@ def causal_resoning(_):
 
 
 def explain(_):
-    config = make_config(model_based=True)
+    config = make_config(args.env, model_based=True)
     trainer = learning.Train(config, "test", 'plot')
-    trainer.init_run(dir_, resume=True)
+    trainer.init_run(args.dir, resume=True)
     trainer.plot_causal_graph().view()
     exp = Explainner(trainer)
     trainer.warmup(5)
@@ -111,6 +88,7 @@ if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
+    parser.add_argument('env', type=str, help="environment name")
     parser.add_argument('command', type=str, default='model_based',
                         help="'model_based', 'model_free', or 'explain'")
     parser.add_argument('--seed', type=int, default=None)
@@ -120,12 +98,6 @@ if __name__ == "__main__":
 
     if args.seed is not None:
       learning.Train.set_seed(args.seed)
-
-    if args.dir is not None:
-        dir_ = args.dir
-    
-    if args.ablation is not None:
-        ablation = args.ablation
 
     if args.command == 'model_based':
         app.run(train_model_based, ['_'])

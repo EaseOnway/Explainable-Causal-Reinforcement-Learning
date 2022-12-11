@@ -90,7 +90,7 @@ class Ablations(_BaseConfig):
         self.no_attn = False
         self.recur = False
         self.offline = False  # do not update causal graph
-
+        self.dense = False
 
 class OptimArgs(_BaseConfig):
     def __init__(self):
@@ -140,6 +140,14 @@ class CausalArgs(_BaseConfig):
         self.n_ensemble = 1
 
 
+class Saliency(_BaseConfig):
+    def __init__(self):
+        super().__init__()
+        self.buffer_size = 1024  # size of expert policy
+        self.sparse_factor = 1.0
+        self.n_batch_per_epoch = 256
+        self.optim_args = OptimArgs()
+
 class Config(_BaseConfig):
     def __init__(self):
         super().__init__()
@@ -148,6 +156,7 @@ class Config(_BaseConfig):
         self.causal_args = CausalArgs()
         self.rl_args = RLArgs()
         self.device = torch.device('cpu')
+        self.saliency = Saliency()
         self.env: Env
     
     def check_valid(self):

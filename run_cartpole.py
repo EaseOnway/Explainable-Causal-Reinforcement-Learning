@@ -58,6 +58,8 @@ def train_model_based(_):
         config.ablations.recur = True
     elif ablation == 'offline':
         config.ablations.offline = True
+    elif ablation == 'dense':
+        config.ablations.dense = True
     elif ablation is not None:
         raise NotImplementedError("Ablation not supported")
     
@@ -66,6 +68,13 @@ def train_model_based(_):
     trainer.warmup(2048, random=True)
     trainer.iter_policy(300, model_based=True)
 
+
+def train_temp(_):
+    config = make_config(model_based=False)
+    config.baseline = 'saliency'
+    trainer = learning.Train(config, "model_free", 'verbose')
+    trainer.init_run(dir_)
+    trainer.iter_policy(300, model_based=False)
 
 def train_model_free(_):
     config = make_config(model_based=False)
@@ -131,5 +140,7 @@ if __name__ == "__main__":
         if args.dir is None:
             raise ValueError("missing argument: '--dir'")
         app.run(explain, ['_'])
+    elif args.command == 'temp':
+        app.run(train_temp, ['_'])
     else:
         raise NotImplementedError(f"Unkown command: {args.command}")

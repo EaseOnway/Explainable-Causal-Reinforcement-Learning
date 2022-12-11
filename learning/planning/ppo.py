@@ -166,7 +166,7 @@ class PPO(Configured):
         self.args = self.config.rl_args
 
         self.actor = Actor(config)
-        self.__old_actor = Actor(config)
+        self._old_actor = Actor(config)
         self.critic = Critic(config)
         self.actor.init_parameters()
         self.critic.init_parameters()
@@ -175,13 +175,13 @@ class PPO(Configured):
     
     def __old_actor_update(self):
         for name, param in self.actor.named_parameters():
-            old_param = self.__old_actor.get_parameter(name)
+            old_param = self._old_actor.get_parameter(name)
             old_param.data[:] = param.data
 
     def actor_loss_entropy(self, data: Transitions):
         with torch.no_grad():
             adv = data[_ADV]
-            old_policy = self.__old_actor.forward(data)
+            old_policy = self._old_actor.forward(data)
             actions = data.select(self.env.names_a).kapply(self.raw2label)
             old_logprob = old_policy.logprob(actions)
 

@@ -378,7 +378,9 @@ class MainTask(ActionQueue):
                 if not self.illegal:
                     out[1] = b
             
-            if self.train_worker == 2 and s.command_centers[1] is None:
+            cc1 = s.command_centers[1]
+            ncc = 2 if (cc1 is not None and cc1.built) else 1
+            if self.train_worker > min(ncc, s.supply_limit - s.supply_used):
                 self.illegal = True
             if self.train_worker > 0 and not self.illegal:
                 out[3] = [ActionMaker.train_scv() for _ in range(self.train_worker)]
