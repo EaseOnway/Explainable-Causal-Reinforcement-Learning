@@ -45,7 +45,7 @@ class SaliencyExplainner(Configured):
     def __epoch(self, n_batch: int):
         if self.trainer.show_detail:
             print("collecting samples...")
-        self.trainer.collect(self.buffer, self.buffer.max_size)
+        self.trainer.collect(self.buffer, self.buffer.max_size, 0.)
 
         log = Log()
         for i in range(n_batch):

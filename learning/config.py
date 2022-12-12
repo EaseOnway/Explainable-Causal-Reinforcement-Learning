@@ -127,7 +127,9 @@ class CausalArgs(_BaseConfig):
         self.maxlen_truth: Optional[int] = 100
         self.maxlen_dream: Optional[int] = 100
         self.dream_batch_size = 32
-        self.n_true_sample = 200
+        self.explore_rate_max = 0.2  # exploration rate for estimating model
+        self.n_sample_collect = 100
+        self.n_sample_evaluate_policy = 100
         self.n_batch_fit = 50
         self.n_batch_fit_new_graph = 500
         self.interval_graph_update = 50

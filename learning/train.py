@@ -103,28 +103,35 @@ class Train(Configured):
         self.__causal_graph = graph
         self.causnet.load_graph(self.__causal_graph)
 
-    def collect(self, buffer: Buffer, n_sample: int, random = False):
+    def collect(self, buffer: Buffer, n_sample: int,
+                explore_rate: Optional[float]):
         '''collect real-world samples into the buffer, and compute returns'''
 
         log = Log()
-        self.env.reset()
-        initiated = True
-        i_step: int = 0
         max_len = self.causal_args.maxlen_truth
+        self.env.reset()
         self.__episodic_return = 0.
 
+        if explore_rate is None:
+            explore_rate = random.uniform(0, self.causal_args.explore_rate_max)
+
         for i_sample in range(n_sample):
+            initiated = self.env.t == 0
+
             # interact with the environment
-            if random:
+            if utils.Random.event(explore_rate):
                 a = self.env.random_action()
             else:
                 a = self.ppo.act(self.env.current_state, False)
 
             transition = self.env.step(a)
-
             reward = transition.reward
             terminated = transition.terminated
-            truncated = (i_step == max_len)
+            truncated = (self.env.t == max_len)
+
+            # reset environment
+            if truncated:
+                self.env.reset()
 
             # record information
             self.__episodic_return += reward
@@ -132,6 +139,7 @@ class Train(Configured):
             if truncated or terminated:
                 log[_RETURN] = self.__episodic_return
                 self.__episodic_return = 0.
+                explore_rate = random.uniform(0, self.causal_args.explore_rate_max)
 
             # truncate the last sample
             if i_sample == n_sample - 1:
@@ -142,15 +150,6 @@ class Train(Configured):
             if self.rl_args.use_reward_scaling:
                 reward = self.__reward_scaling(reward, (truncated or terminated))
             buffer.write(transition.variables, reward, tagcode)
-
-            # reset environment
-            if truncated:
-                self.env.reset()
-            if truncated or terminated:
-                initiated = True
-                i_step = 0
-            else:
-                initiated = False
 
         self.__n_sample += n_sample
         return log
@@ -195,6 +194,34 @@ class Train(Configured):
             buffer.append(t)
             
         assert i_sample == n_sample
+        return log
+    
+    def evaluate_policy(self, n_sample: int):
+        '''collect real-world samples into the buffer, and compute returns'''
+
+        log = Log()
+        max_len = self.causal_args.maxlen_truth
+        self.env.reset()
+        self.__episodic_return = 0.
+
+        for i_sample in range(n_sample):
+            a = self.ppo.act(self.env.current_state, False)
+            transition = self.env.step(a)
+            reward = transition.reward
+            terminated = transition.terminated
+            truncated = (self.env.t == max_len)
+
+            # reset environment
+            if truncated:
+                self.env.reset()
+
+            # record information
+            self.__episodic_return += reward
+            log[_REWARD] = reward
+            if truncated or terminated:
+                log[_RETURN] = self.__episodic_return
+                self.__episodic_return = 0.
+
         return log
 
     def __init_params(self):
@@ -299,8 +326,8 @@ class Train(Configured):
         self.buffer_m.clear()
         self.buffer_p.clear()
 
-    def warmup(self, n_sample: int, random=False):
-        return self.collect(self.buffer_m, n_sample, random=random)
+    def warmup(self, n_sample: int, explore_rate: Optional[float]):
+        return self.collect(self.buffer_m, n_sample, explore_rate)
 
     def __fit_batch(self, transitions: Transitions, eval=False):
         lls = self.causnet.get_loglikeli_dic(transitions)
@@ -385,8 +412,11 @@ class Train(Configured):
         return train_log, eval_log
 
     def __step_policy_model_based(self, i_step: int):
-        # collect true samples
-        log_step = self.collect(self.buffer_m, self.causal_args.n_true_sample)
+        # collect samples
+        self.collect(self.buffer_m, self.causal_args.n_sample_collect, None)
+
+        # evaluate policy
+        log_step = self.evaluate_policy(self.causal_args.n_sample_evaluate_policy)
         true_reward = log_step[_REWARD].mean
         true_return = log_step[_RETURN].mean
 
@@ -447,11 +477,11 @@ class Train(Configured):
     def __step_policy_model_free(self, i_step: int):
         # collect samples
         self.buffer_p.clear()
-        log = self.collect(self.buffer_p, self.buffer_p.max_size)
+        log = self.collect(self.buffer_p, self.buffer_p.max_size, 0.)
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
         self.buffer_m.append(
-            self.buffer_p.sample_batch(self.causal_args.n_true_sample))
+            self.buffer_p.sample_batch(self.causal_args.n_sample_collect))
 
         # planning
         plan_loss = self.ppo.optimize(self.buffer_p)

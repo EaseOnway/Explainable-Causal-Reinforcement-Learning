@@ -52,8 +52,7 @@ class Env(abc.ABC):
 
     class Transition:
         def __init__(self, variables: NamedValues,
-                     reward: float, terminated: bool,
-                     **info):
+                     reward: float, terminated: bool, **info):
             self.variables = variables
             self.reward = reward
             self.terminated = terminated
@@ -83,6 +82,7 @@ class Env(abc.ABC):
         self.__vtypes: Dict[str, vtype.VType] = _def.vtypes
 
         self.__current_state: NamedValues
+        self.__t: int
 
         self.rewarders: Dict[str, Env._Rewarder] = {}
 
@@ -98,7 +98,8 @@ class Env(abc.ABC):
     def reset(self, *args, **kargs):
         ''' initialiize the current state
         '''
-    
+        
+        self.__t = 0
         self.__current_state = self.init_episode(*args, **kargs)
     
     @property
@@ -109,6 +110,10 @@ class Env(abc.ABC):
         except AttributeError:
             self.reset()
             return self.__current_state
+
+    @property
+    def t(self):
+        return self.__t
 
     def step(self, action: NamedValues) -> Transition:
         ''' input acitons, gain outcomes, and update states. if done, reset.
@@ -133,6 +138,7 @@ class Env(abc.ABC):
         if not terminated:
             self.__current_state = {name: variables[Env.name_next(name)]
                                     for name in self.names_s}
+            self.__t += 1
         else:
             self.reset()
 

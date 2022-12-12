@@ -4,7 +4,7 @@ from envs import SC2BuildMarine
 import learning
 import learning.config as cfg
 from learning import Explainner
-from configs import make_config
+from configs import make_config, N_WARM_UP
 
 np.set_printoptions(precision=4)
 
@@ -20,7 +20,7 @@ def train_temp(_):
     exp = SaliencyExplainner(trainer)
     exp.train(10)
     
-    trainer.warmup(5)
+    trainer.warmup(5, 0.)
     tran = trainer.buffer_m.arrays[3]
     a = trainer.env.action_of(tran)
     exp.why(trainer.env.state_of(tran), a)
@@ -44,7 +44,7 @@ def train_model_based(_):
     
     trainer = learning.Train(config, expname, 'verbose')
     trainer.init_run(args.dir)
-    trainer.warmup(512, random=True)
+    trainer.warmup(N_WARM_UP[args.env], 1)
     trainer.iter_policy(300, model_based=True)
 
 
@@ -53,16 +53,17 @@ def train_model_free(_):
     trainer = learning.Train(config, "model_free", 'verbose')
     trainer.init_run(args.dir)
     trainer.iter_policy(300, model_based=False)
-    trainer.causal_reasoning(300)
+    trainer.causal_reasoning(1024 * 16)
 
 
 def causal_resoning(_):
     config = make_config(args.env, model_based=True)
     trainer = learning.Train(config, "test", 'plot')
     trainer.init_run(args.dir, resume=True)
-    trainer.warmup(1000, random=True)
-    trainer.warmup(2000)
-    trainer.causal_reasoning(300)
+    trainer.warmup(N_WARM_UP[args.env], 1)
+    trainer.warmup(N_WARM_UP[args.env], None)
+    trainer.warmup(N_WARM_UP[args.env], 0)
+    trainer.causal_reasoning(1024 * 16)
     trainer.save()
 
 
@@ -72,7 +73,7 @@ def explain(_):
     trainer.init_run(args.dir, resume=True)
     trainer.plot_causal_graph().view()
     exp = Explainner(trainer)
-    trainer.warmup(5)
+    trainer.warmup(5, 0)
     tran = trainer.buffer_m.arrays[3]
     a = trainer.env.action_of(tran)
 
