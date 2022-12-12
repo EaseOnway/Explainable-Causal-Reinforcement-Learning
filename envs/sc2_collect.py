@@ -21,7 +21,7 @@ SCV = UnitType(units.Terran.SCV)
 
 LOC_COMMAND_CENTERS = [(33, 33), (50, 33)]
 LOC_REFINERIES = [(19, 8), (19, 57), (64, 8), (64, 57)]
-LOC_DEPOTS = [(i, j) for j in (13, 52) for i in (30, 38, 46, 54)]
+LOC_DEPOTS = [(i, j) for j in (13, 52) for i in (30, 37, 44, 51)]
 
 MINERAL_FIELD = UnitType(units.Neutral.MineralField)
 GAS_FIELD = UnitType(units.Neutral.VespeneGeyser)

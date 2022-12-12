@@ -107,13 +107,19 @@ class Train(Configured):
                 explore_rate: Optional[float]):
         '''collect real-world samples into the buffer, and compute returns'''
 
+        def get_explore_rate():
+            return random.uniform(0, self.causal_args.explore_rate_max)
+
         log = Log()
         max_len = self.causal_args.maxlen_truth
         self.env.reset()
         self.__episodic_return = 0.
 
         if explore_rate is None:
-            explore_rate = random.uniform(0, self.causal_args.explore_rate_max)
+            explore_rate = get_explore_rate()
+            _explore_rate_fixed = False
+        else:
+            _explore_rate_fixed = True
 
         for i_sample in range(n_sample):
             initiated = self.env.t == 0
@@ -139,7 +145,9 @@ class Train(Configured):
             if truncated or terminated:
                 log[_RETURN] = self.__episodic_return
                 self.__episodic_return = 0.
-                explore_rate = random.uniform(0, self.causal_args.explore_rate_max)
+            
+            if (truncated or terminated) and not _explore_rate_fixed:
+                explore_rate = get_explore_rate()
 
             # truncate the last sample
             if i_sample == n_sample - 1:
