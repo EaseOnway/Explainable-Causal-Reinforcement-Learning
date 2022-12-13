@@ -5,7 +5,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Any
 import torch
 import torch.nn as nn
 
-from ..causal_model.inferrer import DistributionDecoder
+from ..env_model.inferrer import DistributionDecoder
+from ..env_model.encoder import VariableConcat
 from ..buffer import Buffer
 from ..config import Config
 from ..base import Configured, BaseNN
@@ -17,29 +18,6 @@ import utils as u
 
 _ADV = "_ADV_"  # key for advantage
 _TARGET = "_TARGET_"  # key for td-target
-
-
-
-class VariableConcat(BaseNN):
-    def __init__(self, config: Config, var_names: Sequence[str]):
-        super().__init__(config)
-
-        self.__names = tuple(var_names)
-        self.__size = sum(self.v(k).size for k in self.__names)
-
-    @property
-    def names(self):
-        return self.__names
-
-    @property
-    def size(self):
-        return self.__size
-
-    def forward(self, raw: Batch):
-        to_cat = [self.raw2input(name, raw[name]) for name in self.__names]
-        x = self.T.safe_cat(to_cat, (raw.n, -1), 1)
-        assert x.shape[1] == self.__size
-        return x
 
 
 class StateEncoder(VariableConcat):

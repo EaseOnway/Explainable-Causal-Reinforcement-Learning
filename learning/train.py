@@ -11,7 +11,8 @@ from tensorboard.backend.event_processing import event_accumulator
 from core import Batch, Transitions, Tag
 from .buffer import Buffer
 from .causal_discovery import discover, update
-from .causal_model import CausalNet, CausalModel, CausalNetEnsemble
+from .env_model import SimulatedEnvParallel, CausalNet, MLPNet,\
+    EnvNetEnsemble, EnvModelNet
 from .config import Config
 from .base import Configured
 from .planning import PPO
@@ -27,14 +28,7 @@ _CRITIC_LOSS = 'critic loss'
 _ACTOR_ENTROPY = 'actor entropy'
 _REWARD = 'reward'
 _EXP_ROOT = './experiments/'
-_CAUSAL_GRAPH = 'causal.graph'
-_PPO_ACTOR = 'ppo.actor'
-_PPO_CRITIC = 'ppo.critic'
-_CAUSAL_NET = 'causal.net'
-_REWARD_SCALING = 'reward_scaling'
-_SAVED_STATE_DICT = 'saved_state_dict'
-_SAVED_CONFIG = 'config.txt'
-_SAVED_BUFFER = 'buffer'
+_CONFIG_TXT = 'config.txt'
 _RETURN = 'return'
 
 
@@ -54,30 +48,33 @@ class Train(Configured):
         print(self.config)
 
         # arguments
-        self.causal_args = self.config.causal_args
+        self.causal_args = self.config.envmodel_args
         self.rl_args = self.config.rl_args
         self.name = name
-        self.dir = _EXP_ROOT + '/' + str(self.env) + '/' + self.name + '/'
+        self.dir = _EXP_ROOT + str(self.env) + '/' + self.name + '/'
         self.show_loss = (showinfo is not None)
         self.show_detail = (showinfo == 'verbose' or showinfo == 'plot')
         self.show_plot = (showinfo == 'plot')
 
-        # causal graph, causal model, and model optimizer
+        # causal graph, env model, and model optimizer
+        def get_env_net() -> EnvModelNet:
+            if self.config.ablations.mlp:
+                return MLPNet(config)
+            else:
+                return CausalNet(config)
         self.__causal_graph: ParentDict
         if self.causal_args.n_ensemble <= 1:
-            self.causnet = CausalNet(config)
+            self.envnet = get_env_net()
         else:
-            self.causnet = CausalNetEnsemble(config, self.causal_args.n_ensemble)
-        self.causopt = self.F.get_optmizer(self.causal_args.optim_args, self.causnet)
+            _nets = (get_env_net() for _ in range(self.causal_args.n_ensemble))
+            self.envnet = EnvNetEnsemble(config, tuple(_nets))
+        self.causopt = self.F.get_optmizer(self.causal_args.optim_args, self.envnet)
 
         # planning algorithm
         self.ppo = PPO(config)
 
         # buffer for causal model
         self.buffer_m = Buffer(config, self.causal_args.buffer_size)
-
-        # buffer for planning
-        self.buffer_p = Buffer(config, config.rl_args.buffer_size)
 
         # statistics for reward scaling
         self.__reward_scaling = RewardScaling(self.rl_args.discount)
@@ -101,10 +98,13 @@ class Train(Configured):
     @final
     def causal_graph(self, graph: ParentDict):
         self.__causal_graph = graph
-        self.causnet.load_graph(self.__causal_graph)
+        if not self.config.ablations.mlp:
+            assert(isinstance(self.envnet, CausalNet) or
+                   isinstance(self.envnet, EnvNetEnsemble))
+            self.envnet.load_graph(self.__causal_graph)
 
     def collect(self, buffer: Buffer, n_sample: int,
-                explore_rate: Optional[float]):
+                explore_rate: Optional[float], eval=False):
         '''collect real-world samples into the buffer, and compute returns'''
 
         def get_explore_rate():
@@ -159,17 +159,18 @@ class Train(Configured):
                 reward = self.__reward_scaling(reward, (truncated or terminated))
             buffer.write(transition.variables, reward, tagcode)
 
-        self.__n_sample += n_sample
+        if not eval:
+            self.__n_sample += n_sample
+
         return log
 
     def __dream(self, buffer: Buffer, n_sample: int):
         '''generate samples into the buffer using the environment model'''
-        buffer = self.buffer_p
         log = Log()
 
         max_len = self.causal_args.maxlen_dream
         batchsize = self.causal_args.dream_batch_size
-        env_m = CausalModel(self.causnet, self.buffer_m, max_len)
+        env_m = SimulatedEnvParallel(self.envnet, self.buffer_m, max_len)
         env_m.reset(batchsize)
         
         tr: List[Transitions] = []
@@ -235,7 +236,7 @@ class Train(Configured):
     def __init_params(self):
         self.ppo.actor.init_parameters()
         self.ppo.critic.init_parameters()
-        self.causnet.init_parameters()
+        self.envnet.init_parameters()
         self.causal_graph = {j: {i for i in self.env.names_inputs
                                  if utils.Random.event(self.causal_args.prior)}
                              for j in self.env.names_outputs}
@@ -244,38 +245,66 @@ class Train(Configured):
         return utils.visualize.plot_digraph(
             self.env.names_inputs + self.env.names_outputs,
             self.__causal_graph, format=format)  # type: ignore
-
-    def state_dict(self):
-        return {_PPO_ACTOR: self.ppo.actor.state_dict(),
-                _PPO_CRITIC: self.ppo.critic.state_dict(),
-                _CAUSAL_NET: self.causnet.state_dict(),
-                _CAUSAL_GRAPH: self.__causal_graph,
-                _REWARD_SCALING: self.__reward_scaling.state_dict()}
     
-    def load_state_dict(self, dic: Dict[str, Any], policy=True, model=True):
-        if policy:
-            self.ppo.actor.load_state_dict(dic[_PPO_ACTOR])
-            self.ppo.critic.load_state_dict(dic[_PPO_CRITIC])
-        if model:
-            self.causnet.load_state_dict(dic[_CAUSAL_NET])
-            self.causal_graph = dic[_CAUSAL_GRAPH]
-        self.__reward_scaling.load_state_dict(dic[_REWARD_SCALING])
+    __SAVE_KEY = Literal['agent', 'env-model', 'causal-graph',
+                         'runtime', 'buffer']
 
-    def load(self, path: Optional[str] = None, policy=True, model=True, buffer=False):
-        temp = path or self.__run_dir + _SAVED_STATE_DICT
-        self.load_state_dict(torch.load(temp), policy, model)
+    def save_item(self, key: __SAVE_KEY, path: Optional[str] = None):
+        path = path or (self.__run_dir + 'saved-' + key)
+        if key == 'agent':
+            torch.save({'actor': self.ppo.actor.state_dict(),
+                        'critic': self.ppo.critic.state_dict()}, path)
+        elif key == 'env-model':
+            torch.save({'inference-network': self.envnet.state_dict(),
+                        'causal-graph': self.__causal_graph}, path)
+        elif key == 'causal-graph':
+            torch.save(self.__causal_graph, path)
+        elif key == 'runtime':
+            torch.save({'reward_scaling': self.__reward_scaling.state_dict(),
+                        'n_sample': self.__n_sample}, path)
+        elif key == 'buffer':
+            self.buffer_m.save(path)
+        else:
+            raise NotImplementedError
         
-        if buffer:
-            temp = path or self.__run_dir + _SAVED_BUFFER
-            self.buffer_m.load(temp)
+        print(f"successfully saved [{key}] to {path}")
 
-    def save(self, path: Optional[str] = None, buffer=False):
-        temp = path or self.__run_dir + _SAVED_STATE_DICT
-        torch.save(self.state_dict(), temp)
-
-        if buffer:
-            temp = path or self.__run_dir + _SAVED_BUFFER
-            self.buffer_m.save(temp)
+    def load_item(self, key: __SAVE_KEY, path: Optional[str] = None):
+        path = path or (self.__run_dir + 'saved-' + key)
+        saved = torch.load(path)
+        if key == 'agent':
+            self.ppo.actor.load_state_dict(saved['actor'])
+            self.ppo.critic.load_state_dict(saved['critic'])
+        elif key == 'env-model':
+            self.envnet.load_state_dict(saved['inference-network'])
+            self.causal_graph = saved['causal-graph']
+        elif key == 'causal-graph':
+            self.causal_graph = saved
+        elif key == 'runtime':
+            self.__reward_scaling.load_state_dict(saved['reward_scaling'])
+            self.__n_sample = saved['n_sample']
+        elif key == 'buffer':
+            self.buffer_m.load(path)
+        else:
+            raise NotImplementedError
+        
+        print(f"successfully loaded [{key}] from {path}")
+    
+    def save_items(self, *keys: __SAVE_KEY):
+        for key in set(keys):
+            self.save_item(key)
+    
+    def load_items(self, *keys: __SAVE_KEY, skip_if_not_exist = False):
+        if len(keys) == 0:
+            keys = ('agent', 'env-model', 'causal-graph', 'runtime', 'buffer')
+        for key in set(keys):
+            try:
+                self.load_item(key)
+            except FileNotFoundError as e:
+                if skip_if_not_exist:
+                    pass
+                else:
+                    raise e
     
     def __get_data_for_causal_discovery(self) -> NamedArrays:
        temp = self.buffer_m.tensors[:]
@@ -304,55 +333,43 @@ class Train(Configured):
                 os.makedirs(path)
         return path
     
-    def __resume_nsample(self, path: str):
-        e = event_accumulator.EventAccumulator(path)
-        e.Reload()
-        return int(e.scalars.Items('return')[-1].step)
-    
     def init_run(self, dir: Optional[str] = None, resume=False,
                  n_sample: Optional[int] = None):
         path = self.__run_dir = self.__get_run_dir(dir)
-        self.config.to_txt(path + _SAVED_CONFIG)
-
+        self.config.to_txt(path + _CONFIG_TXT)
+        self.__n_sample = 0
         if resume:
-            self.load()
-            if n_sample is None:
-                self.__n_sample = self.__resume_nsample(path)
-                self.__writer = tensorboardX.SummaryWriter(path)
-            else:
-                self.__n_sample = n_sample
-                self.__writer = tensorboardX.SummaryWriter(path, purge_step=n_sample)
+            self.load_items(skip_if_not_exist=True)
+            self.__writer = tensorboardX.SummaryWriter(
+                path, purge_step=self.__n_sample)
         else:
-            self.__n_sample = 0
             self.__init_params()
-            self.save()
             self.__writer = tensorboardX.SummaryWriter(path)
 
         self.__episodic_return = 0.
         
         self.env.reset()
         self.buffer_m.clear()
-        self.buffer_p.clear()
 
     def warmup(self, n_sample: int, explore_rate: Optional[float]):
         return self.collect(self.buffer_m, n_sample, explore_rate)
 
     def __fit_batch(self, transitions: Transitions, eval=False):
-        lls = self.causnet.get_loglikeli_dic(transitions)
-        ll = self.causnet.loglikelihood(lls)
+        lls = self.envnet.get_loglikeli_dic(transitions)
+        ll = self.envnet.loglikelihood(lls)
         loss = -ll
         if not eval:
             loss.backward()
             self.F.optim_step(self.causal_args.optim_args,
-                              self.causnet, self.causopt)
+                              self.envnet, self.causopt)
         return float(loss), {k: float(e) for k, e in lls.items()}
 
-    def __fit_epoch(self, log: Log, eval=False):
+    def __fit_epoch(self, buffer: Buffer, log: Log, eval=False):
         '''
         train network with fixed causal graph.
         '''
         args = self.causal_args.optim_args
-        for batch in self.buffer_m.epoch(args.batchsize):
+        for batch in buffer.epoch(args.batchsize):
             loss, lls = self.__fit_batch(batch, eval)
             log[_NLL_LOSS] = loss
             for k, ll in lls.items():
@@ -366,13 +383,13 @@ class Train(Configured):
         log[_LL].plots(self.env.names_outputs)
         Log.show()
     
-    def fit(self, n_batch: int):
+    def fit(self, n_batch: int, converge_interval=-1):
         # fit causal equation
         train_log = Log()
         batch_size = self.causal_args.optim_args.batchsize
 
         print(f"start fitting...")
-        self.causnet.train(True)
+        self.envnet.train(True)
         for i_batch in range(n_batch):
             batch = self.buffer_m.sample_batch(batch_size)
             nll, loglikelihoods = self.__fit_batch(batch, eval=False)
@@ -384,15 +401,25 @@ class Train(Configured):
                 interval = n_batch // 20
                 if interval == 0 or (i_batch + 1) % interval == 0:
                     print(f"batch {i_batch + 1}/{n_batch}: loss = {nll}")
+            
+            # check converge
+            if converge_interval > 0 and i_batch >= converge_interval\
+                    and (i_batch + 1) % converge_interval == 0:
+                data = train_log[_NLL_LOSS].data
+                window1 = data[-2*converge_interval: -converge_interval]
+                window2 = data[-converge_interval:]
+                if np.mean(window2) >= np.mean(window1):
+                    print("converge detected. stop iteration.")
+                    break
 
         # evaluate
-        self.causnet.train(False)
+        self.envnet.train(False)
         eval_log = Log()
-        self.__fit_epoch(eval_log, eval=True)
+        self.__fit_epoch(self.buffer_m, eval_log, eval=True)
         
         # show info
         if self.show_loss:
-            print(f"fitting loss:\t{eval_log[_NLL_LOSS].mean}")
+            print(f"nll-loss:\t{eval_log[_NLL_LOSS].mean}")
         if self.show_detail:
             for k in self.env.names_outputs:
                 print(f"log-likelihood of '{k}':\t{eval_log[_LL, k].mean}")
@@ -401,25 +428,23 @@ class Train(Configured):
         
         return train_log, eval_log
 
-    def causal_reasoning(self, n_batch: int):
+    def causal_discovery(self):
         # causal discovery
         if self.config.ablations.dense:
             self.causal_graph = self.env.get_full_graph()
+        elif self.config.ablations.mlp:
+            pass
         else:
             data = self.__get_data_for_causal_discovery()
             self.causal_graph = discover(data, self.env,
                                         self.causal_args.pthres_independent,
                                         self.show_detail,
                                         self.causal_args.n_jobs_fcit)
-        train_log, eval_log = self.fit(n_batch)
-        
-        # save
-        self.save()
-        print('Done.')
-
-        return train_log, eval_log
 
     def __step_policy_model_based(self, i_step: int):
+        # planing buffer
+        buffer_p = Buffer(self.config, self.config.rl_args.buffer_size)
+
         # collect samples
         self.collect(self.buffer_m, self.causal_args.n_sample_collect, None)
 
@@ -431,8 +456,8 @@ class Train(Configured):
         # fit causal equation
         if not self.ablations.offline\
                 and i_step % self.causal_args.interval_graph_update == 0:
-            _, fit_eval = self.causal_reasoning(
-                self.causal_args.n_batch_fit_new_graph)
+            self.causal_discovery()
+            _, fit_eval = self.fit(self.causal_args.n_batch_fit_new_graph)
         else:
             _, fit_eval = self.fit(self.causal_args.n_batch_fit)
 
@@ -440,12 +465,12 @@ class Train(Configured):
         plan_log = Log()
         for i_round in range(self.rl_args.n_round_model_based):
             # dream samples
-            self.buffer_p.clear()
-            dream_log = self.__dream(self.buffer_p, self.buffer_p.max_size)
+            buffer_p.clear()
+            dream_log = self.__dream(buffer_p, buffer_p.max_size)
             plan_log[_REWARD] = dream_log[_REWARD].mean
 
             # planning
-            loss = self.ppo.optimize(self.buffer_p)
+            loss = self.ppo.optimize(buffer_p)
             plan_log[_ACTOR_LOSS] = actor_loss = loss['actor'].mean
             plan_log[_CRITIC_LOSS] = critic_loss = loss['critic'].mean
             plan_log[_ACTOR_ENTROPY] = actor_entropy = loss['entropy'].mean
@@ -483,16 +508,19 @@ class Train(Configured):
             print(f"actor entropy:\t{actor_entropy}")
     
     def __step_policy_model_free(self, i_step: int):
+        # planing buffer
+        buffer_p = Buffer(self.config, self.config.rl_args.buffer_size)
+        
         # collect samples
-        self.buffer_p.clear()
-        log = self.collect(self.buffer_p, self.buffer_p.max_size, 0.)
+        buffer_p.clear()
+        log = self.collect(buffer_p, buffer_p.max_size, 0.)
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
         self.buffer_m.append(
-            self.buffer_p.sample_batch(self.causal_args.n_sample_collect))
+            buffer_p.sample_batch(self.causal_args.n_sample_collect))
 
         # planning
-        plan_loss = self.ppo.optimize(self.buffer_p)
+        plan_loss = self.ppo.optimize(buffer_p)
         actor_loss = plan_loss['actor'].mean
         critic_loss = plan_loss['critic'].mean
         actor_entropy = plan_loss['entropy'].mean
@@ -522,8 +550,45 @@ class Train(Configured):
             print(f"step {i}: ")
             if model_based:
                 self.__step_policy_model_based(i)
+                self.save_items('env-model', 'agent', 'runtime')
             else:
                 self.__step_policy_model_free(i)
-            
-            self.save()
+                self.save_items('agent', 'runtime')
             print("Done.")
+
+    def iter_model(self, train_set: Buffer, test_set: Buffer,
+                   n_step: int, n_batch_fit: int):
+        writer = self.__writer
+
+        n = len(train_set)
+
+        # collect train samples
+        self.buffer_m.clear()
+        
+        interval = max(n // n_step, 1)
+        for i in range(0, n, interval):
+            tran = train_set.transitions[i: i + interval]
+            self.buffer_m.append(tran)
+
+            # causal_reasoning
+            self.causal_discovery()
+            self.fit(n_batch_fit, 256)
+
+            # eval
+            log = Log()
+            self.__fit_epoch(test_set, log, eval=True)
+
+            # write summary
+            writer.add_scalar('log-likeligood', -log[_NLL_LOSS].mean, self.__n_sample)
+            writer.add_scalars('log_likelihood_variable',
+                {k: log[_LL, k].mean for k in self.env.names_outputs}, self.__n_sample)
+
+            print(f"test ({i}/{n}):")
+            # show info
+            if self.show_loss:
+                print(f"- total log-likelihood:\t{-log[_NLL_LOSS].mean}")
+            if self.show_detail:
+                for k in self.env.names_outputs:
+                    print(f"- log-likelihood of '{k}':\t{log[_LL, k].mean}")
+            
+            self.save_item('env-model')

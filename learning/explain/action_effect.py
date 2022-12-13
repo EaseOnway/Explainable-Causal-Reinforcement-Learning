@@ -3,8 +3,8 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set
 import numpy as np
 import torch
 
-from ..causal_model.inferrer import Inferrer
-from ..causal_model import CausalNet, SimulatedEnv
+from ..env_model.inferrer import Inferrer
+from ..env_model import CausalNet, SimulatedEnv
 from ..train import Train
 from core import Batch
 from utils.visualize import plot_digraph
@@ -13,7 +13,6 @@ from ..config import Config
 from ..base import Configured
 
 import core.scm as scm
-from core import Env, Distributions
 
 
 class ActionEffect(Configured):

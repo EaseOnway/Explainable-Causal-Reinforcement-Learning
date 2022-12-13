@@ -80,16 +80,18 @@ class NetDims(_BaseConfig):
         self.inferrer_key: int = 64
         self.inferrer_feed_forward: int = 128
         self.decoder_hidden: int = 128
+        self.mlp_model_hidden: int = 256
         self.actor_critic_hidden: int = 64
 
 
 class Ablations(_BaseConfig):
     def __init__(self):
         super().__init__()
-        
+  
         self.no_attn = False
         self.recur = False
-        self.offline = False  # do not update causal graph
+        self.mlp = False
+        self.offline = False
         self.dense = False
 
 class OptimArgs(_BaseConfig):
@@ -120,7 +122,7 @@ class RLArgs(_BaseConfig):
         self.use_reward_scaling = True
 
 
-class CausalArgs(_BaseConfig):
+class EnvModelArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
         self.buffer_size = 10000  
@@ -136,11 +138,9 @@ class CausalArgs(_BaseConfig):
         self.optim_args = OptimArgs()
         self.prior = 0.25
         self.pthres_independent = 0.05
-        self.pthres_likeliratio = 0.1
         self.adaptive_thres = True
         self.n_jobs_fcit = -1
         self.n_ensemble = 1
-
 
 class Saliency(_BaseConfig):
     def __init__(self):
@@ -155,7 +155,7 @@ class Config(_BaseConfig):
         super().__init__()
         self.dims = NetDims()
         self.ablations = Ablations()
-        self.causal_args = CausalArgs()
+        self.envmodel_args = EnvModelArgs()
         self.rl_args = RLArgs()
         self.device = torch.device('cpu')
         self.saliency = Saliency()

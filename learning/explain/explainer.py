@@ -16,7 +16,7 @@ class Explainner(Configured):
         super().__init__(trainer.config)
 
         self.trainer = trainer
-        self.causnet = trainer.causnet
+        self.causnet = trainer.envnet
  
     def why(self, state: NamedValues, action: NamedValues,
             maxlen: Optional[int] = None,

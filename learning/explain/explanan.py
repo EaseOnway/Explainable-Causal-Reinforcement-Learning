@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set, L
 import numpy as np
 import torch
 
-from ..causal_model import SimulatedEnv, CausalNetEnsemble
+from ..env_model import SimulatedEnv, EnvNetEnsemble, CausalNet
 from ..train import Train
 from utils.typings import NamedValues, SortedNames
 from core import Env
@@ -340,10 +340,13 @@ class TrajectoryGenerator:
         self.thres = thres
         self.discount = trainer.config.rl_args.discount
 
-        if isinstance(self.trainer.causnet, CausalNetEnsemble):
-            self.causnet = self.trainer.causnet.get_random_net()
+        if isinstance(self.trainer.envnet, EnvNetEnsemble):
+            envnet = self.trainer.envnet.get_random_net()
         else:
-            self.causnet = self.trainer.causnet
+            envnet = self.trainer.envnet
+        if not isinstance(envnet, CausalNet):
+            raise TypeError("Require causal enviornment model")
+        self.envnet = envnet
         
         self.__action: Optional[NamedValues]
         self.__terminated: bool
@@ -352,7 +355,7 @@ class TrajectoryGenerator:
         self.__causal_chain: CausalChain
 
     def reset(self, state: NamedValues):
-        self.env = SimulatedEnv(self.causnet, state, self.mode)
+        self.env = SimulatedEnv(self.envnet, state, self.mode)
         self.env.reset()
 
         self.__terminated = False
@@ -378,7 +381,7 @@ class TrajectoryGenerator:
             transition = self.env.step(a)
             self.__terminated = transition.terminated
             
-            ae = ActionEffect(self.causnet, a, partial)
+            ae = ActionEffect(self.envnet, a, partial)
             transition.info[_ACTION_EFFECT] = ae
             self.__causal_chain.step(transition)
             self.__step += 1

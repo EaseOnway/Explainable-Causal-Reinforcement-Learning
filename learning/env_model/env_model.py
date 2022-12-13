@@ -2,7 +2,7 @@ from typing import Union, Optional
 import torch
 import numpy as np
 
-from .causal_net import CausalNet
+from .env_net import EnvModelNet
 from core import Env
 from core import Batch, Transitions, Tag
 from ..buffer import Buffer
@@ -12,8 +12,8 @@ from utils.typings import NamedTensors, NamedValues
 import utils
 
 
-class CausalModel(Configured):
-    def __init__(self, net: CausalNet, truth_buffer: Buffer,
+class SimulatedEnvParallel(Configured):
+    def __init__(self, net: EnvModelNet, truth_buffer: Buffer,
                  max_trlen: Optional[int] = None):
         super().__init__(net.config)
         self.__true_env = net.env
@@ -95,7 +95,7 @@ class CausalModel(Configured):
 
 
 class SimulatedEnv(Env):
-    def __init__(self, net: CausalNet, init_state: NamedValues,
+    def __init__(self, net: EnvModelNet, init_state: NamedValues,
                  mode=False):
         super().__init__(net.env._def)
         self.mode = mode

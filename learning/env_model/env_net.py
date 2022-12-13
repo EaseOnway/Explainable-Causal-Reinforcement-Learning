@@ -10,19 +10,50 @@ import random
 
 from core import Batch, Distributions, Transitions
 from ..base import BaseNN
-from .encoder import VariableEncoder
-from .inferrer import StateKey, DistributionInferrer
+from .encoder import VariableEncoder, VariableConcat
+from .inferrer import StateKey, DistributionInferrer, DistributionDecoder
 from learning.config import Config
 from utils.typings import NamedTensors, SortedParentDict, NamedArrays, NamedValues
 import utils
 
 
-class CausalNet(BaseNN):
-
+class EnvModelNet(BaseNN):
     def __init__(self, config: Config):
         super().__init__(config)
 
-        dims = config.dims
+    def forward(self, raw_data: Batch) -> Distributions:
+        raise NotImplementedError
+    
+    def get_loglikeli_dic(self, raw_data: Batch):
+        '''get the dictionary of log-likelihoood'''
+        
+        labels = raw_data.select(self.env.names_outputs).kapply(self.raw2label)
+        predicted = self.forward(raw_data)
+        logprobs = predicted.logprobs(labels)
+        return {k: torch.mean(v) for k, v in logprobs.items()}
+
+    def loglikelihood(self, lldic: NamedTensors):
+        ls = list(lldic.values())
+        return torch.sum(torch.stack(ls))
+    
+    def simulate(self, state_actions: NamedValues, mode=False):
+        self.train(False)
+        with torch.no_grad():
+            data =  Batch.from_sample(self.named_tensors(state_actions))
+            dis = self.forward(data)
+            if mode:
+                out = dis.mode()
+            else:
+                out = dis.sample()
+            out = out.kapply(self.label2raw)
+            out = self.as_numpy(out, drop_batch=True)
+        return out
+
+
+class CausalNet(EnvModelNet):
+
+    def __init__(self, config: Config):
+        super().__init__(config)
 
         self.parent_dic: SortedParentDict = {}
         self.parent_dic_s: SortedParentDict = {}
@@ -69,40 +100,47 @@ class CausalNet(BaseNN):
 
         return outs
 
-    def get_loglikeli_dic(self, raw_data: Batch):
-        '''get the dictionary of log-likelihoood'''
-        
-        labels = raw_data.select(self.env.names_outputs).kapply(self.raw2label)
-        predicted = self.forward(raw_data)
-        logprobs = predicted.logprobs(labels)
-        return {k: torch.mean(v) for k, v in logprobs.items()}
 
-    def loglikelihood(self, lldic: NamedTensors):
-        ls = list(lldic.values())
-        return torch.sum(torch.stack(ls))
-    
-    def simulate(self, state_actions: NamedValues, mode=False):
-        self.train(False)
-        with torch.no_grad():
-            data =  Batch.from_sample(self.named_tensors(state_actions))
-            dis = self.forward(data)
-            if mode:
-                out = dis.mode()
-            else:
-                out = dis.sample()
-            out = out.kapply(self.label2raw)
-            out = self.as_numpy(out, drop_batch=True)
-        return out
+class MLPNet(EnvModelNet):
+
+    def __init__(self, config: Config):
+        super().__init__(config)
+
+        self.encoder = VariableConcat(config, self.env.names_inputs)
+        dim = config.dims.mlp_model_hidden
+        self.mlp = nn.Sequential(
+            nn.Linear(self.encoder.size, dim, **self.torchargs),
+            nn.LeakyReLU(),
+            nn.Linear(dim, dim, **self.torchargs),
+        )
+        self.decoders: Dict[str, DistributionDecoder] = {}
+        self.k_model = StateKey(config)
+
+        for name in self.env.names_outputs:
+            self.decoders[name] = DistributionDecoder(dim, self.v(name), config)
+            self.add_module(f'{name}_decoder', self.decoders[name])
+
+    def forward(self, raw_data: Batch) -> Distributions:
+        concat_data = self.encoder.forward(raw_data)
+        encoded_data: torch.Tensor = self.mlp(concat_data)
+        outs = Distributions(raw_data.n)
+
+        for var in self.env.names_outputs:
+            decoder = self.decoders[var]
+            out = decoder.forward(encoded_data)
+            outs[var] = out
+
+        return outs
 
 
-class CausalNetEnsemble(CausalNet):
-    def __init__(self, config: Config, n: int):
+class EnvNetEnsemble(EnvModelNet):
+    def __init__(self, config: Config, networks: Tuple[EnvModelNet, ...]):
         BaseNN.__init__(self, config)
 
-        self.__networks: List[CausalNet] = []
-        for i in range(n):
-            self.__networks.append(CausalNet(config))
+        self.__networks = networks
         for i, network in enumerate(self.__networks):
+            if isinstance(network, EnvNetEnsemble):
+                raise TypeError("we do not accept an ensemble as a sub-network")
             self.add_module(f"network_{i}", network)
     
     def __getitem__(self, i: int):
@@ -116,7 +154,8 @@ class CausalNetEnsemble(CausalNet):
 
     def load_graph(self, parent_dic: Dict[str, Set[str]]):
         for network in self.__networks:
-            network.load_graph(parent_dic)
+            if isinstance(network, CausalNet):
+                network.load_graph(parent_dic)
     
     def get_random_net(self):
         return random.choice(self.__networks)

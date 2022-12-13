@@ -180,7 +180,7 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
     d1_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
         joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
 
-    # Compute mses for y = f(x, reshuffle(z)), varying train-test splits.
+    # Compute mses for y = f(reshuffle(x), z), varying train-test splits.
     if z.shape[1] == 0:
         x_indep_y = x[np.random.permutation(n_samples)]
     else:
