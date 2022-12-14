@@ -10,7 +10,7 @@ from tensorboard.backend.event_processing import event_accumulator
 
 from core import Batch, Transitions, Tag
 from .buffer import Buffer
-from .causal_discovery import discover, update
+from .causal_discovery import discover
 from .env_model import SimulatedEnvParallel, CausalNet, MLPNet,\
     EnvNetEnsemble, EnvModelNet
 from .config import Config
@@ -103,8 +103,8 @@ class Train(Configured):
                    isinstance(self.envnet, EnvNetEnsemble))
             self.envnet.load_graph(self.__causal_graph)
 
-    def collect(self, buffer: Buffer, n_sample: int,
-                explore_rate: Optional[float], eval=False):
+    def collect(self, buffer: Buffer, n_sample: int, explore_rate: Optional[float],
+                reward_scaling: bool):
         '''collect real-world samples into the buffer, and compute returns'''
 
         def get_explore_rate():
@@ -155,12 +155,9 @@ class Train(Configured):
             
             # write buffer
             tagcode = Tag.encode(terminated, truncated, initiated)
-            if self.rl_args.use_reward_scaling:
+            if reward_scaling:
                 reward = self.__reward_scaling(reward, (truncated or terminated))
             buffer.write(transition.variables, reward, tagcode)
-
-        if not eval:
-            self.__n_sample += n_sample
 
         return log
 
@@ -333,26 +330,19 @@ class Train(Configured):
                 os.makedirs(path)
         return path
     
-    def init_run(self, dir: Optional[str] = None, resume=False,
-                 n_sample: Optional[int] = None):
+    def init_run(self, dir: Optional[str] = None):
         path = self.__run_dir = self.__get_run_dir(dir)
         self.config.to_txt(path + _CONFIG_TXT)
         self.__n_sample = 0
-        if resume:
-            self.load_items(skip_if_not_exist=True)
-            self.__writer = tensorboardX.SummaryWriter(
-                path, purge_step=self.__n_sample)
-        else:
-            self.__init_params()
-            self.__writer = tensorboardX.SummaryWriter(path)
-
+        self.__init_params()
+        self.__writer = tensorboardX.SummaryWriter(path)
         self.__episodic_return = 0.
-        
         self.env.reset()
         self.buffer_m.clear()
 
     def warmup(self, n_sample: int, explore_rate: Optional[float]):
-        return self.collect(self.buffer_m, n_sample, explore_rate)
+        return self.collect(self.buffer_m, n_sample, explore_rate,
+                            self.rl_args.use_reward_scaling)
 
     def __fit_batch(self, transitions: Transitions, eval=False):
         lls = self.envnet.get_loglikeli_dic(transitions)
@@ -446,7 +436,9 @@ class Train(Configured):
         buffer_p = Buffer(self.config, self.config.rl_args.buffer_size)
 
         # collect samples
-        self.collect(self.buffer_m, self.causal_args.n_sample_collect, None)
+        self.collect(self.buffer_m, self.causal_args.n_sample_collect, None,
+                     self.rl_args.use_reward_scaling)
+        self.__n_sample += self.causal_args.n_sample_collect
 
         # evaluate policy
         log_step = self.evaluate_policy(self.causal_args.n_sample_evaluate_policy)
@@ -513,7 +505,9 @@ class Train(Configured):
         
         # collect samples
         buffer_p.clear()
-        log = self.collect(buffer_p, buffer_p.max_size, 0.)
+        log = self.collect(buffer_p, buffer_p.max_size, 0.,
+                           self.rl_args.use_reward_scaling)
+        self.__n_sample += buffer_p.max_size
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
         self.buffer_m.append(
@@ -556,34 +550,37 @@ class Train(Configured):
                 self.save_items('agent', 'runtime')
             print("Done.")
 
-    def iter_model(self, train_set: Buffer, test_set: Buffer,
-                   n_step: int, n_batch_fit: int):
+    def iter_model(self, train_size: int, test_size: int, 
+                   n_step: int, n_batch: int, explore_rate: Optional[float]):
         writer = self.__writer
 
-        n = len(train_set)
-
         # collect train samples
+        test = Buffer(self.config)
+
+        print("collecting test samples")
+        self.collect(test, test_size, explore_rate, False)
         self.buffer_m.clear()
         
-        interval = max(n // n_step, 1)
-        for i in range(0, n, interval):
-            tran = train_set.transitions[i: i + interval]
-            self.buffer_m.append(tran)
+        interval = max(train_size // n_step, 1)
+        for i in range(0, train_size, interval):
+            print(f"test ({i + interval}/{train_size}):")
+            print("  collecting samples")
+            self.collect(self.buffer_m, interval, explore_rate, False)
 
             # causal_reasoning
             self.causal_discovery()
-            self.fit(n_batch_fit, 256)
+            self.envnet.init_parameters()
+            self.fit(n_batch, -1)
 
             # eval
             log = Log()
-            self.__fit_epoch(test_set, log, eval=True)
+            self.__fit_epoch(test, log, eval=True)
 
             # write summary
-            writer.add_scalar('log-likeligood', -log[_NLL_LOSS].mean, self.__n_sample)
+            writer.add_scalar('log-likelihood', -log[_NLL_LOSS].mean, len(self.buffer_m))
             writer.add_scalars('log_likelihood_variable',
-                {k: log[_LL, k].mean for k in self.env.names_outputs}, self.__n_sample)
-
-            print(f"test ({i}/{n}):")
+                {k: log[_LL, k].mean for k in self.env.names_outputs}, len(self.buffer_m))
+            
             # show info
             if self.show_loss:
                 print(f"- total log-likelihood:\t{-log[_NLL_LOSS].mean}")

@@ -98,7 +98,7 @@ class OptimArgs(_BaseConfig):
     def __init__(self):
         super().__init__()
 
-        self.lr = 1e-3
+        self.lr = 1e-4
         self.algorithm = "Adam"
         self.alg_args: Dict[str, Any] = {}
         self.batchsize = 128
@@ -142,13 +142,14 @@ class EnvModelArgs(_BaseConfig):
         self.n_jobs_fcit = -1
         self.n_ensemble = 1
 
-class Saliency(_BaseConfig):
+
+class Baseline(_BaseConfig):
     def __init__(self):
         super().__init__()
-        self.buffer_size = 1024  # size of expert policy
-        self.sparse_factor = 1.0
-        self.n_batch_per_epoch = 256
+        self.sparse_factor = 0.02
         self.optim_args = OptimArgs()
+        self.dim_q_hidden = 128
+        self.n_sample_importance = 12
 
 class Config(_BaseConfig):
     def __init__(self):
@@ -158,7 +159,7 @@ class Config(_BaseConfig):
         self.envmodel_args = EnvModelArgs()
         self.rl_args = RLArgs()
         self.device = torch.device('cpu')
-        self.saliency = Saliency()
+        self.baseline = Baseline()
         self.env: Env
     
     def check_valid(self):

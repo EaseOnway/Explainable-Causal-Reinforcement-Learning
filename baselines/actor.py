@@ -16,10 +16,6 @@ from core import DType
 import utils as u
 
 
-_ADV = "_ADV_"  # key for advantage
-_TARGET = "_TARGET_"  # key for td-target
-
-
 class VariableConcat(BaseNN):
     def __init__(self, config: Config, var_names: Sequence[str]):
         super().__init__(config)

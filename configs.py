@@ -49,6 +49,7 @@ def make_config(env_name: Literal['cartpole',
         config.envmodel_args.interval_graph_update = 16
         config.envmodel_args.n_jobs_fcit = 16
         config.envmodel_args.n_ensemble = 1
+        config.baseline.buffersize = 10000
     elif env_name == 'collect':
         config.env = envs.SC2Collect()
         config.rl_args.buffer_size = 2048 if model_based else 80
@@ -67,6 +68,7 @@ def make_config(env_name: Literal['cartpole',
         config.envmodel_args.interval_graph_update = 16
         config.envmodel_args.n_jobs_fcit = 16
         config.envmodel_args.n_ensemble = 1
+        config.baseline.buffersize = 2000
     elif env_name == 'buildmarine':
         config.env = envs.SC2BuildMarine()
         config.rl_args.buffer_size = 2048 if model_based else 80
@@ -85,9 +87,10 @@ def make_config(env_name: Literal['cartpole',
         config.envmodel_args.interval_graph_update = 8
         config.envmodel_args.n_jobs_fcit = 16
         config.envmodel_args.n_ensemble = 1
+        config.baseline.buffersize = 2000
     elif env_name == 'lunarlander':
         config.env = envs.LunarLander(continuous=True)
-        config.rl_args.buffer_size = 4096 if model_based else 1024
+        config.rl_args.buffer_size = 4096 if model_based else 2048
         config.rl_args.discount = 0.975
         config.rl_args.gae_lambda = 0.94
         config.rl_args.kl_penalty = 0.1
@@ -103,6 +106,7 @@ def make_config(env_name: Literal['cartpole',
         config.envmodel_args.interval_graph_update = 16
         config.envmodel_args.n_jobs_fcit = 16
         config.envmodel_args.n_ensemble = 1
+        config.baseline.buffersize = 20000
     else:
         raise ValueError(f"unknown environment: {env_name}")
 

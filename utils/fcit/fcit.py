@@ -75,7 +75,7 @@ def cv_besttree(x, y, z, cv_grid, logdim, verbose, prop_test):
         clf = DecisionTreeRegressor(max_features=max_features)
         splitter = ShuffleSplit(n_splits=3, test_size=prop_test)
         cv = GridSearchCV(estimator=clf, cv=splitter,
-                          param_grid={'min_samples_split': cv_grid}, n_jobs=-1)
+                          param_grid={'min_samples_split': cv_grid})
         cv.fit(interleave(x, z), y)
         min_samples_split = cv.best_params_['min_samples_split']
     if verbose:
@@ -117,8 +117,7 @@ def obtain_error(data_and_i):
 
 def test(x, y, z=None, num_perm=8, prop_test=.1,
          discrete=(False, False), plot_return=False, verbose=False,
-         logdim=False, cv_grid=[2, 8, 64, 512, 1e-2, .2, .4],
-         n_jobs=-1):
+         logdim=False, cv_grid=[2, 8, 64, 512, 1e-2, .2, .4]):
     """ Fast conditional independence test, based on decision-tree regression.
 
     See Chalupka, Perona, Eberhardt 2017 [arXiv link coming].
@@ -177,8 +176,9 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
         'reshuffle': False,
         'clf': clf,
     }
-    d1_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
-        joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
+    # d1_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
+    #     joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
+    d1_stats = np.array([obtain_error((datadict, i)) for i in range(num_perm)])
 
     # Compute mses for y = f(reshuffle(x), z), varying train-test splits.
     if z.shape[1] == 0:
@@ -189,8 +189,10 @@ def test(x, y, z=None, num_perm=8, prop_test=.1,
                       verbose, prop_test=prop_test)
     datadict['reshuffle'] = True
     datadict['x'] = x_indep_y
-    d0_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
-        joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
+    
+    # d0_stats = np.array(joblib.Parallel(n_jobs=n_jobs, max_nbytes=100e6)(
+    #     joblib.delayed(obtain_error)((datadict, i)) for i in range(num_perm)))
+    d0_stats = np.array([obtain_error((datadict, i)) for i in range(num_perm)])
 
     if verbose:
         np.set_printoptions(precision=3)

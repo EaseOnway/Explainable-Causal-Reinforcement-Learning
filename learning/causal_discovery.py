@@ -1,9 +1,10 @@
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
+import joblib
 
 import utils
-from utils.typings import ParentDict, NamedArrays, Edge
+from utils.typings import ParentDict, NamedArrays, SortedNames
 
 from .buffer import Buffer
 from core.env import Env
@@ -14,50 +15,35 @@ def _concat_data(data: NamedArrays, names: Iterable[str]) -> np.ndarray:
     return np.concatenate(to_cat, axis=1)
 
 
-def update(old: ParentDict, data: NamedArrays, env: Env, target: str,
-           thres=0.05, inplace=True, showinfo=True, n_jobs=-1):
-    assert target in env.names_outputs
-
-    if inplace:
-        new: ParentDict = old
-    else:
-        new = old.copy()
-
-    pa = set()
-
-    if showinfo:
-        print(f"finding causations of '{target}':")
-
-    def _test(i: str):
-        nonlocal pa, data
-
-        cond = _concat_data(data,
-            (name for name in env.names_inputs if name != i))
-        p = utils.fcit_test(data[i], data[target], cond, n_jobs=n_jobs)
-        assert isinstance(p, float)
-        dependent = p <= thres # or np.isnan(p)
-        if dependent:
-            pa.add(i)
-        if showinfo:
-            print("\tcaused by (%s) with assurrance %.5f " % (i, 1 - p))
-
-    for i in env.names_inputs:
-        _test(i)
-    
-    print(f"Result: ({', '.join(pa)}) --> {target}")
-    
-    new[target] = pa
-    return new
+def _test(edge: Tuple[str, str], data: NamedArrays, input_names: SortedNames):
+    i, j = edge
+    cond = _concat_data(data,
+        (name for name in input_names if name != i))
+    p = utils.fcit_test(data[i], data[j], cond)
+    assert isinstance(p, float)
+    print("\t(%s) caused by (%s) with assurrance %.5f " % (j, i, 1 - p))
+    return p
 
 
 def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True,
-             n_jobs=-1) -> ParentDict:
+             n_jobs=1) -> ParentDict:
     pa_dic: ParentDict = {
         key: set() for key in env.names_outputs}
+    
+    print('starting causal discovery')
+    edges = [(i, j) for j in env.names_outputs for i in env.names_inputs]
 
-    for j in env.names_outputs:
-        update(pa_dic, data, env, j, thres, inplace=True, showinfo=showinfo,
-               n_jobs=n_jobs)
+    p_values = joblib.Parallel(n_jobs)(
+        joblib.delayed(_test)(edge, data, env.names_inputs)
+        for edge in edges)
+    assert p_values is not None
+
+    for (i, j), p in zip (edges, p_values):
+        dependent = p <= thres # or np.isnan(p)
+        if dependent:
+            pa_dic[j].add(i)
+        # if showinfo:
+        #    print("\tcaused by (%s) with assurrance %.5f " % (i, 1 - p))
     
     if showinfo:
         print('-------------------discovered-causal-graph---------------------')
@@ -66,5 +52,3 @@ def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True,
         print('---------------------------------------------------------------')
     
     return pa_dic
-
-
