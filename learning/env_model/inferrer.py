@@ -7,13 +7,13 @@ from utils import Shaping
 from core import Batch
 from learning.config import Config
 from .encoder import Aggregator
-from ..base import BaseNN
+from ..base import BaseNN, Context
 from core.vtype import VType
 
 
 class StateKey(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
         self.idx_map = {k: i for i, k in enumerate(self.env.names_s)}
         self.K = nn.parameter.Parameter(
             torch.zeros(self.env.num_s, self.dims.inferrer_key,
@@ -25,8 +25,8 @@ class StateKey(BaseNN):
 
 
 class Inferrer(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
         d = self.dims.variable_encoding
         d_emb = self.dims.action_influce_embedding
@@ -34,10 +34,10 @@ class Inferrer(BaseNN):
         dh_agg = self.dims.aggregator_hidden
         dff = self.dims.inferrer_feed_forward
 
-        if config.ablations.recur:
-            self.aggregator = Aggregator(d, dv, dh_agg, config)
+        if self.config.ablations.recur:
+            self.aggregator = Aggregator(d, dv, dh_agg, context)
         else:
-            self.aggregator = Aggregator(d, d_emb, dh_agg, config)
+            self.aggregator = Aggregator(d, d_emb, dh_agg, context)
             self.linear_vs = nn.Linear(d, dv, **self.torchargs)
             self.linear_va = nn.Linear(d_emb, dv, **self.torchargs)
             self.linear_q = nn.Linear(d_emb, dk, **self.torchargs)
@@ -145,8 +145,8 @@ class Inferrer(BaseNN):
 
 
 class DistributionDecoder(BaseNN):
-    def __init__(self, dim_in: int, vtype: VType, config: Config):
-        super().__init__(config)
+    def __init__(self, dim_in: int, vtype: VType, context: Context):
+        super().__init__(context)
         self._vtype = vtype
         self._ptype = vtype.ptype
 
@@ -168,10 +168,10 @@ class DistributionDecoder(BaseNN):
 
 
 class DistributionInferrer(Inferrer):
-    def __init__(self, vtype: VType, config: Config):
-        super().__init__(config)
-        dff = config.dims.inferrer_feed_forward
-        self.decoder = DistributionDecoder(dff, vtype, config)
+    def __init__(self, vtype: VType, context: Context):
+        super().__init__(context)
+        dff = self.dims.inferrer_feed_forward
+        self.decoder = DistributionDecoder(dff, vtype, context)
     
     def forward(self, actions: torch.Tensor, kstates: torch.Tensor,
                 states: torch.Tensor):

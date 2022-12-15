@@ -338,7 +338,7 @@ class TrajectoryGenerator:
         self.mode = mode
         self.trainer = trainer
         self.thres = thres
-        self.discount = trainer.config.rl_args.discount
+        self.discount = trainer.config.rl.discount
 
         if isinstance(self.trainer.envnet, EnvNetEnsemble):
             envnet = self.trainer.envnet.get_random_net()
@@ -372,7 +372,7 @@ class TrajectoryGenerator:
         if self.__terminated:
             return None
         else:
-            a = self.trainer.ppo.act(self.env.current_state, mode=self.mode)
+            a = self.trainer.ppo.actor.act(self.env.current_state, mode=self.mode)
             partial = None
             if self.__action is not None:
                 partial = set(self.__action.keys())

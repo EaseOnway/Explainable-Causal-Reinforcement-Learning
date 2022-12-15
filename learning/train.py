@@ -14,8 +14,8 @@ from .causal_discovery import discover
 from .env_model import SimulatedEnvParallel, CausalNet, MLPNet,\
     EnvNetEnsemble, EnvModelNet
 from .config import Config
-from .base import Configured
-from .planning import PPO
+from .base import RLBase, Context
+from .planning import PPO, Actor
 from utils import Log, RewardScaling
 from utils.typings import ParentDict, NamedArrays
 import utils
@@ -28,11 +28,11 @@ _CRITIC_LOSS = 'critic loss'
 _ACTOR_ENTROPY = 'actor entropy'
 _REWARD = 'reward'
 _EXP_ROOT = './experiments/'
-_CONFIG_TXT = 'config.txt'
+_CONFIG_JSON = 'config.json'
 _RETURN = 'return'
 
 
-class Train(Configured):
+class Train(RLBase):
 
     @staticmethod
     def set_seed(seed: int):
@@ -43,13 +43,15 @@ class Train(Configured):
 
     def __init__(self, config: Config, name: str,
                  showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):
-        super().__init__(config)
+        context = Context(config)
+        super().__init__(context)
+
         print("Using following configuration:")
         print(self.config)
 
         # arguments
-        self.causal_args = self.config.envmodel_args
-        self.rl_args = self.config.rl_args
+        self.env_model_args = self.config.env_model
+        self.rl_args = self.config.rl
         self.name = name
         self.dir = _EXP_ROOT + str(self.env) + '/' + self.name + '/'
         self.show_loss = (showinfo is not None)
@@ -59,32 +61,32 @@ class Train(Configured):
         # causal graph, env model, and model optimizer
         def get_env_net() -> EnvModelNet:
             if self.config.ablations.mlp:
-                return MLPNet(config)
+                return MLPNet(context)
             else:
-                return CausalNet(config)
+                return CausalNet(context)
         self.__causal_graph: ParentDict
-        if self.causal_args.n_ensemble <= 1:
+        if self.env_model_args.n_ensemble <= 1:
             self.envnet = get_env_net()
         else:
-            _nets = (get_env_net() for _ in range(self.causal_args.n_ensemble))
-            self.envnet = EnvNetEnsemble(config, tuple(_nets))
-        self.causopt = self.F.get_optmizer(self.causal_args.optim_args, self.envnet)
+            _nets = (get_env_net() for _ in range(self.env_model_args.n_ensemble))
+            self.envnet = EnvNetEnsemble(context, tuple(_nets))
+        self.causopt = self.F.get_optmizer(self.env_model_args.optim, self.envnet)
 
         # planning algorithm
-        self.ppo = PPO(config)
+        self.ppo = PPO(context)
 
         # buffer for causal model
-        self.buffer_m = Buffer(config, self.causal_args.buffer_size)
+        self.buffer_m = Buffer(context, self.env_model_args.buffer_size)
 
         # statistics for reward scaling
         self.__reward_scaling = RewardScaling(self.rl_args.discount)
         
         # declear runtime variables
         self.__n_sample: int
-        self.__episodic_return: float
         self.__run_dir: str
         self.__writer: tensorboardX.SummaryWriter
-    
+        self.__best_actor: Actor
+
     @property
     def run_dir(self):
         return self.__run_dir
@@ -104,16 +106,17 @@ class Train(Configured):
             self.envnet.load_graph(self.__causal_graph)
 
     def collect(self, buffer: Buffer, n_sample: int, explore_rate: Optional[float],
-                reward_scaling: bool):
+                reward_scaling: bool, actor: Optional[Actor] = None):
         '''collect real-world samples into the buffer, and compute returns'''
 
         def get_explore_rate():
-            return random.uniform(0, self.causal_args.explore_rate_max)
+            return random.uniform(0, self.env_model_args.explore_rate_max)
 
         log = Log()
-        max_len = self.causal_args.maxlen_truth
+        max_len = self.env_model_args.maxlen_truth
         self.env.reset()
-        self.__episodic_return = 0.
+        episodic_return = 0.
+        actor = actor or self.ppo.actor
 
         if explore_rate is None:
             explore_rate = get_explore_rate()
@@ -128,7 +131,7 @@ class Train(Configured):
             if utils.Random.event(explore_rate):
                 a = self.env.random_action()
             else:
-                a = self.ppo.act(self.env.current_state, False)
+                a = actor.act(self.env.current_state, False)
 
             transition = self.env.step(a)
             reward = transition.reward
@@ -140,11 +143,11 @@ class Train(Configured):
                 self.env.reset()
 
             # record information
-            self.__episodic_return += reward
+            episodic_return += reward
             log[_REWARD] = reward
             if truncated or terminated:
-                log[_RETURN] = self.__episodic_return
-                self.__episodic_return = 0.
+                log[_RETURN] = episodic_return
+                episodic_return = 0.
             
             if (truncated or terminated) and not _explore_rate_fixed:
                 explore_rate = get_explore_rate()
@@ -152,7 +155,7 @@ class Train(Configured):
             # truncate the last sample
             if i_sample == n_sample - 1:
                 truncated = True
-            
+
             # write buffer
             tagcode = Tag.encode(terminated, truncated, initiated)
             if reward_scaling:
@@ -165,8 +168,8 @@ class Train(Configured):
         '''generate samples into the buffer using the environment model'''
         log = Log()
 
-        max_len = self.causal_args.maxlen_dream
-        batchsize = self.causal_args.dream_batch_size
+        max_len = self.env_model_args.maxlen_dream
+        batchsize = self.env_model_args.dream_batch_size
         env_m = SimulatedEnvParallel(self.envnet, self.buffer_m, max_len)
         env_m.reset(batchsize)
         
@@ -206,12 +209,12 @@ class Train(Configured):
         '''collect real-world samples into the buffer, and compute returns'''
 
         log = Log()
-        max_len = self.causal_args.maxlen_truth
+        max_len = self.env_model_args.maxlen_truth
         self.env.reset()
-        self.__episodic_return = 0.
+        episodic_return = 0.
 
         for i_sample in range(n_sample):
-            a = self.ppo.act(self.env.current_state, False)
+            a = self.ppo.actor.act(self.env.current_state, False)
             transition = self.env.step(a)
             reward = transition.reward
             terminated = transition.terminated
@@ -222,11 +225,11 @@ class Train(Configured):
                 self.env.reset()
 
             # record information
-            self.__episodic_return += reward
+            episodic_return += reward
             log[_REWARD] = reward
             if truncated or terminated:
-                log[_RETURN] = self.__episodic_return
-                self.__episodic_return = 0.
+                log[_RETURN] = episodic_return
+                episodic_return = 0.
 
         return log
 
@@ -235,7 +238,7 @@ class Train(Configured):
         self.ppo.critic.init_parameters()
         self.envnet.init_parameters()
         self.causal_graph = {j: {i for i in self.env.names_inputs
-                                 if utils.Random.event(self.causal_args.prior)}
+                                 if utils.Random.event(self.env_model_args.prior)}
                              for j in self.env.names_outputs}
 
     def plot_causal_graph(self, format='png'):
@@ -332,11 +335,10 @@ class Train(Configured):
     
     def init_run(self, dir: Optional[str] = None):
         path = self.__run_dir = self.__get_run_dir(dir)
-        self.config.to_txt(path + _CONFIG_TXT)
+        self.config.save(path + _CONFIG_JSON)
         self.__n_sample = 0
         self.__init_params()
         self.__writer = tensorboardX.SummaryWriter(path)
-        self.__episodic_return = 0.
         self.env.reset()
         self.buffer_m.clear()
 
@@ -350,7 +352,7 @@ class Train(Configured):
         loss = -ll
         if not eval:
             loss.backward()
-            self.F.optim_step(self.causal_args.optim_args,
+            self.F.optim_step(self.env_model_args.optim,
                               self.envnet, self.causopt)
         return float(loss), {k: float(e) for k, e in lls.items()}
 
@@ -358,7 +360,7 @@ class Train(Configured):
         '''
         train network with fixed causal graph.
         '''
-        args = self.causal_args.optim_args
+        args = self.env_model_args.optim
         for batch in buffer.epoch(args.batchsize):
             loss, lls = self.__fit_batch(batch, eval)
             log[_NLL_LOSS] = loss
@@ -376,7 +378,7 @@ class Train(Configured):
     def fit(self, n_batch: int, converge_interval=-1):
         # fit causal equation
         train_log = Log()
-        batch_size = self.causal_args.optim_args.batchsize
+        batch_size = self.env_model_args.optim.batchsize
 
         print(f"start fitting...")
         self.envnet.train(True)
@@ -427,31 +429,37 @@ class Train(Configured):
         else:
             data = self.__get_data_for_causal_discovery()
             self.causal_graph = discover(data, self.env,
-                                        self.causal_args.pthres_independent,
+                                        self.env_model_args.pthres_independent,
                                         self.show_detail,
-                                        self.causal_args.n_jobs_fcit)
+                                        self.env_model_args.n_jobs_fcit)
 
     def __step_policy_model_based(self, i_step: int):
         # planing buffer
-        buffer_p = Buffer(self.config, self.config.rl_args.buffer_size)
+        buffer_p = Buffer(self.context, self.config.rl.buffer_size)
 
-        # collect samples
-        self.collect(self.buffer_m, self.causal_args.n_sample_collect, None,
-                     self.rl_args.use_reward_scaling)
-        self.__n_sample += self.causal_args.n_sample_collect
+        # explore using best actor
+        self.collect(self.buffer_m, self.env_model_args.n_sample_explore, None,
+                     self.rl_args.use_reward_scaling, self.__best_actor)
 
-        # evaluate policy
-        log_step = self.evaluate_policy(self.causal_args.n_sample_evaluate_policy)
+        # exploit using the current actor
+        log_step = self.collect(self.buffer_m, self.env_model_args.n_sample_exploit, 0,
+                                self.rl_args.use_reward_scaling)
+        self.__n_sample += self.env_model_args.n_sample_exploit
         true_reward = log_step[_REWARD].mean
         true_return = log_step[_RETURN].mean
 
+        # update the best actor
+        if true_reward > self.__best_reward:
+            self.__best_actor.load_state_dict(self.ppo.actor.state_dict())
+            self.__best_reward = true_reward
+
         # fit causal equation
         if not self.ablations.offline\
-                and i_step % self.causal_args.interval_graph_update == 0:
+                and i_step % self.env_model_args.interval_graph_update == 0:
             self.causal_discovery()
-            _, fit_eval = self.fit(self.causal_args.n_batch_fit_new_graph)
+            _, fit_eval = self.fit(self.env_model_args.n_batch_fit_new_graph)
         else:
-            _, fit_eval = self.fit(self.causal_args.n_batch_fit)
+            _, fit_eval = self.fit(self.env_model_args.n_batch_fit)
 
         # planning
         plan_log = Log()
@@ -501,7 +509,7 @@ class Train(Configured):
     
     def __step_policy_model_free(self, i_step: int):
         # planing buffer
-        buffer_p = Buffer(self.config, self.config.rl_args.buffer_size)
+        buffer_p = Buffer(self.context, self.config.rl.buffer_size)
         
         # collect samples
         buffer_p.clear()
@@ -511,7 +519,7 @@ class Train(Configured):
         true_reward = log[_REWARD].mean
         true_return = log[_RETURN].mean
         self.buffer_m.append(
-            buffer_p.sample_batch(self.causal_args.n_sample_collect))
+            buffer_p.sample_batch(self.env_model_args.n_sample_explore))
 
         # planning
         plan_loss = self.ppo.optimize(buffer_p)
@@ -540,6 +548,10 @@ class Train(Configured):
             self.ppo.show_loss(plan_loss)
 
     def iter_policy(self, n_step: int, model_based=False):
+        if model_based:
+            self.__best_reward = -np.inf
+            self.__best_actor = Actor(self.context)
+
         for i in range(0, n_step):
             print(f"step {i}: ")
             if model_based:
@@ -555,7 +567,7 @@ class Train(Configured):
         writer = self.__writer
 
         # collect train samples
-        test = Buffer(self.config)
+        test = Buffer(self.context)
 
         print("collecting test samples")
         self.collect(test, test_size, explore_rate, False)

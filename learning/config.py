@@ -1,41 +1,15 @@
 from typing import Any, Dict, Literal, Set, Tuple, final, Optional
-from core import Env
 import torch
+
+import json
 
 
 class _BaseConfig:
-    __reserved = ("__readonly__")
-
-    def __init__(self):
-        self.__readonly__: bool
-        super().__setattr__("__readonly__", False)
-    
-    def check_valid(self):
-        assert True
-    
-    @final
-    def confirm(self):
-        try:
-            self.check_valid()
-        except Exception as e:
-            print("Invalid Configuration!")
-            raise e
-
-        super().__setattr__("__readonly__", True)
-        for k, v in self.items():
-            if isinstance(v, _BaseConfig):
-                v.confirm()
-
-    @final
-    def items(self):
-        for k, v in vars(self).items():
-            if k not in _BaseConfig.__reserved:
-                yield k, v
 
     @final
     def __lines(self, parent: str = ""):
         lines = []
-        for k, v in self.items():
+        for k, v in self.__dict__.items():
             if isinstance(v, _BaseConfig):
                 lines.extend(v.__lines(parent + k + '.'))
             else:
@@ -59,19 +33,39 @@ class _BaseConfig:
             f.write(str(self))
     
     @final
-    def __setattr__(self, __name: str, __value: Any) -> None:
-        if __name in _BaseConfig.__reserved:
-            raise ValueError(f"Cannot set reserver attribute {__name}")
-        elif self.__readonly__:
-            raise ValueError(f"Cannot modify read-only configuration.")
-        else:
-            super().__setattr__(__name, __value)
+    def to_dict(self):
+        out = {}
+        for k, v in self.__dict__.items():
+            if isinstance(v, _BaseConfig):
+                out[k] = v.to_dict()
+            else:
+                out[k] = v
+        return out
+    
+    @final
+    def load_dict(self, d: Dict):
+        for k, v in d.items():
+            temp = getattr(self, k)
+            if isinstance(temp, _BaseConfig):
+                temp.load_dict(v)
+            else:
+                setattr(self, k, v)
+    
+    def save(self, path: str):
+        if path[-5:] != '.json':
+            path = path + '.json'
+        with open(path, 'w') as f:
+            json.dump(self.to_dict(), f, indent=4)
+
+    def load(self, path: str):
+        if path[-5:] != '.json':
+            path = path + '.json'
+        with open(path, 'r') as f:
+            self.load_dict(json.load(f))
 
 
 class NetDims(_BaseConfig):
     def __init__(self):
-        super().__init__()
-
         self.variable_encoding: int = 64
         self.variable_encoder_hidden: int = 64
         self.action_influce_embedding: int = 128
@@ -86,8 +80,6 @@ class NetDims(_BaseConfig):
 
 class Ablations(_BaseConfig):
     def __init__(self):
-        super().__init__()
-  
         self.no_attn = False
         self.recur = False
         self.mlp = False
@@ -96,8 +88,6 @@ class Ablations(_BaseConfig):
 
 class OptimArgs(_BaseConfig):
     def __init__(self):
-        super().__init__()
-
         self.lr = 1e-4
         self.algorithm = "Adam"
         self.alg_args: Dict[str, Any] = {}
@@ -108,7 +98,6 @@ class OptimArgs(_BaseConfig):
 
 class RLArgs(_BaseConfig):
     def __init__(self):
-        super().__init__()
         self.buffer_size = 2000
         self.discount = 0.95  # gamma
         self.gae_lambda = 0.9
@@ -117,52 +106,43 @@ class RLArgs(_BaseConfig):
         self.n_epoch_critic = 5
         self.n_epoch_actor = 1
         self.n_round_model_based = 20
-        self.optim_args = OptimArgs()
+        self.optim = OptimArgs()
         self.use_adv_norm = True
         self.use_reward_scaling = True
 
 
 class EnvModelArgs(_BaseConfig):
     def __init__(self):
-        super().__init__()
         self.buffer_size = 10000  
         self.maxlen_truth: Optional[int] = 100
         self.maxlen_dream: Optional[int] = 100
         self.dream_batch_size = 32
         self.explore_rate_max = 0.2  # exploration rate for estimating model
-        self.n_sample_collect = 100
-        self.n_sample_evaluate_policy = 100
+        self.n_sample_explore = 100
+        self.n_sample_exploit = 100
         self.n_batch_fit = 50
         self.n_batch_fit_new_graph = 500
         self.interval_graph_update = 50
-        self.optim_args = OptimArgs()
+        self.optim = OptimArgs()
         self.prior = 0.25
         self.pthres_independent = 0.05
-        self.adaptive_thres = True
         self.n_jobs_fcit = -1
         self.n_ensemble = 1
 
 
 class Baseline(_BaseConfig):
     def __init__(self):
-        super().__init__()
-        self.sparse_factor = 0.02
-        self.optim_args = OptimArgs()
+        self.sparse_factor = 0.001
+        self.optim = OptimArgs()
         self.dim_q_hidden = 128
         self.n_sample_importance = 12
 
 class Config(_BaseConfig):
     def __init__(self):
-        super().__init__()
         self.dims = NetDims()
         self.ablations = Ablations()
-        self.envmodel_args = EnvModelArgs()
-        self.rl_args = RLArgs()
-        self.device = torch.device('cpu')
+        self.env_model = EnvModelArgs()
+        self.rl = RLArgs()
+        self.device_id: str = 'cpu'
+        self.env_id: str = 'UNDEFINED'
         self.baseline = Baseline()
-        self.env: Env
-    
-    def check_valid(self):
-        if not hasattr(self, 'env'):
-            raise AttributeError(
-                "missing configuration of 'env' (environment)")

@@ -1,7 +1,7 @@
 from typing import Any, Dict, Union, Optional
 
-from .base import Configured
-from .config import Config
+from .base import RLBase, Context
+
 from core import Transitions
 from core.vtype import DType
 
@@ -11,10 +11,10 @@ import numpy as np
 from torch import Tensor
 
 
-class Buffer(Configured):
+class Buffer(RLBase):
 
-    def __init__(self, config: Config, max_size=1000):
-        super().__init__(config)
+    def __init__(self, context: Context, max_size=1000):
+        super().__init__(context)
 
         self.__max_size = max_size
         self.__cache_size = 2 * max_size

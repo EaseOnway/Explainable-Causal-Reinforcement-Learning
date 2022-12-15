@@ -10,16 +10,16 @@ from core import Batch
 from utils.visualize import plot_digraph
 from utils.typings import NamedTensors, NamedValues, Edge, SortedNames
 from ..config import Config
-from ..base import Configured
+from ..base import RLBase
 
 import core.scm as scm
 
 
-class ActionEffect(Configured):
+class ActionEffect(RLBase):
     def __init__(self, network: CausalNet, action: NamedValues,
                  intervened_names: Optional[Set[str]] = None):
 
-        super().__init__(network.config)
+        super().__init__(network.context)
 
         self.network = network
         self.action = action

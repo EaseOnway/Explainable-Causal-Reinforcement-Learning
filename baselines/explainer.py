@@ -8,32 +8,32 @@ from learning.buffer import Buffer
 from core.data import Transitions, Batch
 from utils.typings import NamedValues
 from utils import Log
-from learning.base import Configured
+from learning.base import RLBase
 
 from .actor import SaliencyActor
 from .q_net import QNet
 
 
-class BaselineExplainner(Configured):
+class BaselineExplainner(RLBase):
 
     def __init__(self, trainer: Train):
-        super().__init__(trainer.config)
+        super().__init__(trainer.context)
 
         self.trainer = trainer
         self.expert_actor = trainer.ppo.actor
-        self.masked_actor = SaliencyActor(self.config)
-        self.qnet = QNet(self.config)
+        self.masked_actor = SaliencyActor(self.context)
+        self.qnet = QNet(self.context)
 
         self.args = self.config.baseline
         self.opt_saliency = self.F.get_optmizer(
-            self.args.optim_args, self.masked_actor)
+            self.args.optim, self.masked_actor)
         self.opt_q = self.F.get_optmizer(
-            self.args.optim_args, self.qnet)
+            self.args.optim, self.qnet)
 
     def __batch_q(self, batch: Transitions):
         q = self.qnet(batch)
         r = batch.rewards
-        gamma = self.config.rl_args.discount
+        gamma = self.config.rl.discount
         with torch.no_grad():
             next_batch = self.shift_states(batch)
             next_pi = self.expert_actor.forward(next_batch)
@@ -43,7 +43,7 @@ class BaselineExplainner(Configured):
             target = torch.where(batch.terminated, r, r + gamma * next_q)
         td_error = torch.mean(torch.square(target - q))
         td_error.backward()
-        self.F.optim_step(self.args.optim_args, self.qnet, self.opt_q)
+        self.F.optim_step(self.args.optim, self.qnet, self.opt_q)
         return float(td_error)
 
     def __batch_saliency(self, batch: Transitions):
@@ -58,19 +58,19 @@ class BaselineExplainner(Configured):
         loss = nll_loss + self.args.sparse_factor * sparity_loss
 
         loss.backward()
-        self.F.optim_step(self.args.optim_args, self.masked_actor, self.opt_saliency)
+        self.F.optim_step(self.args.optim, self.masked_actor, self.opt_saliency)
         
         return float(nll_loss), float(sparity_loss)
     
     def train_saliency(self, n_sample: int, n_batch: int):
         log = Log()
-        buffer = Buffer(self.config, n_sample)
+        buffer = Buffer(self.context, n_sample)
 
         print("collecting sample")
         self.trainer.collect(buffer, n_sample, 0., False)
 
         for i in range(n_batch):
-            batch = buffer.sample_batch(self.args.optim_args.batchsize)
+            batch = buffer.sample_batch(self.args.optim.batchsize)
             nll_loss, sparity_loss = self.__batch_saliency(batch)
             log['nll_loss'] = nll_loss
             log['sparity_loss'] = sparity_loss
@@ -90,13 +90,13 @@ class BaselineExplainner(Configured):
 
     def train_q(self, n_sample: int, n_batch: int):
         log = Log()
-        buffer = Buffer(self.config, n_sample)
+        buffer = Buffer(self.context, n_sample)
 
         print("collecting sample")
         self.trainer.collect(buffer, n_sample, None, False)
 
         for i in range(n_batch):
-            batch = buffer.sample_batch(self.args.optim_args.batchsize)
+            batch = buffer.sample_batch(self.args.optim.batchsize)
             td_error = self.__batch_q(batch)
             log['td_error'] = td_error
         

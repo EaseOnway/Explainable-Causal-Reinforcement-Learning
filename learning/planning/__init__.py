@@ -1,1 +1,1 @@
-from .ppo import PPO
+from .ppo import PPO, Actor, Critic

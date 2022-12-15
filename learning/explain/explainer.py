@@ -5,15 +5,15 @@ import torch
 
 from ..train import Train
 from utils.typings import NamedValues
-from ..base import Configured
+from ..base import RLBase
 
 
 from .explanan import TrajectoryGenerator
 
-class Explainner(Configured):
+class Explainner(RLBase):
 
     def __init__(self, trainer: Train):
-        super().__init__(trainer.config)
+        super().__init__(trainer.context)
 
         self.trainer = trainer
         self.causnet = trainer.envnet
@@ -53,7 +53,7 @@ class Explainner(Configured):
         trgen_cf.reset(state)
 
         if action_f is None:
-            action_f = self.trainer.ppo.act(state, mode=True)
+            action_f = self.trainer.ppo.actor.act(state, mode=True)
         trgen_f.intervene({k: action_f[k] for k in action_cf})
         trgen_cf.intervene(action_cf)
 

@@ -3,10 +3,13 @@ from typing import Dict, final, Optional, Any
 import torch.nn as nn
 import torch
 import torch.distributions as D
+import abc
 
 from .config import *
 from core import Batch, Distributions, Transitions
 from core import VType, DType
+
+from envs import make_env
 
 import utils as u
 from utils.typings import *
@@ -35,26 +38,38 @@ class Functional:
         opt.step()
         opt.zero_grad()
 
-class Configured:
+
+class Context:
+    def __init__(self, config: Config):
+        self.config = config
+        self.env = make_env(config.env_id)
+        self.device = torch.device(config.device_id)
+        self.torchargs = {'device': self.device,
+                          'dtype': DType.Real.torch}
+        self.tensor_operator = u.TensorOperator(**self.torchargs)
+
+
+class RLBase:
 
     F = Functional
 
-    def __init__(self, config: Config):
-        if not config.__readonly__:
-            config.confirm()
-            print("Configuration Confirmed!")
+    def __init__(self, context: Context):
+        self.__context = context
+        self.__config = context.config
+        self.__env = context.env
+        self.__device = context.device
+        self.__torchargs = context.torchargs
+        self.__tensor_operator = context.tensor_operator
 
-        self.__config = config
-        self.__env = config.env
-        self.__device = config.device
-        self.__torchargs = {'device': self.__device,
-                            'dtype': DType.Real.torch}
-        self.__tensor_operator = u.TensorOperator(**self.__torchargs)
-    
     @property
     @final
     def config(self):
         return self.__config
+    
+    @property
+    @final
+    def context(self):
+        return self.__context
 
     @property
     @final
@@ -88,7 +103,7 @@ class Configured:
 
     @final
     def v(self, name: str):
-        return self.__config.env.var(name)
+        return self.env.var(name)
 
     @final
     def shift_states(self, transition: Batch):
@@ -120,11 +135,11 @@ class Configured:
 
 
 
-class BaseNN(nn.Module, Configured):
+class BaseNN(nn.Module, RLBase):
 
-    def __init__(self, config: Config):
+    def __init__(self, context: Context):
         nn.Module.__init__(self)
-        Configured.__init__(self, config)
+        RLBase.__init__(self, context)
 
     def init_parameters(self):
         for p in self.parameters():
@@ -132,3 +147,9 @@ class BaseNN(nn.Module, Configured):
                 nn.init.normal_(p)
             else:
                 nn.init.orthogonal_(p)
+    
+    def save(self, path: str):
+        torch.save(self.state_dict(), path)
+    
+    def load(self, path: str):
+        self.load_state_dict(torch.load(path))

@@ -9,7 +9,7 @@ from ..env_model.inferrer import DistributionDecoder
 from ..env_model.encoder import VariableConcat
 from ..buffer import Buffer
 from ..config import Config
-from ..base import Configured, BaseNN
+from ..base import RLBase, BaseNN, Context
 from core import Batch, Transitions, Distributions
 from utils.typings import NamedValues
 from core import DType
@@ -21,15 +21,15 @@ _TARGET = "_TARGET_"  # key for td-target
 
 
 class StateEncoder(VariableConcat):
-    def __init__(self, config: Config,
+    def __init__(self, context: Context,
                  restriction: Optional[Iterable[str]] = None):
         if restriction is None:
-            names = config.env.names_s
+            names = context.env.names_s
         else:
             names = sorted(set(restriction))
-        super().__init__(config, names)
+        super().__init__(context, names)
 
-        dim = config.dims.actor_critic_hidden
+        dim = self.dims.actor_critic_hidden
         self.mlp = nn.Sequential(
             nn.Linear(self.size, dim, **self.torchargs),
             nn.LeakyReLU(),
@@ -48,10 +48,10 @@ class StateEncoder(VariableConcat):
 
 
 class Critic(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
-        self.state_encoder = StateEncoder(config)
+        self.state_encoder = StateEncoder(context)
 
         dim = self.dims.actor_critic_hidden
         self.readout = nn.Sequential(
@@ -79,14 +79,14 @@ class Critic(BaseNN):
             v_next = self.value(self.shift_states(transitions))
             
             # compute TD-residuals
-            gamma = self.config.rl_args.discount
+            gamma = self.config.rl.discount
             v_next = torch.masked_fill(v_next, terminated, 0.)
             td_residual = (r + gamma * v_next) - v
 
             # compute advantages using GAE
             done = transitions.done
             n = transitions.n
-            w = self.config.rl_args.discount * self.config.rl_args.gae_lambda
+            w = self.config.rl.discount * self.config.rl.gae_lambda
             if w > 0:
                 gae = torch.empty(n, dtype=DType.Real.torch,
                                   device=self.device)
@@ -103,7 +103,7 @@ class Critic(BaseNN):
             # compute targets
             targets = v + gae
 
-        if self.config.rl_args.use_adv_norm:
+        if self.config.rl.use_adv_norm:
             std, mean = torch.std_mean(gae)
             adv = (gae - mean) / (std + 1e-8)
         else:
@@ -114,18 +114,18 @@ class Critic(BaseNN):
             
 
 class Actor(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
         self._akeys = self.env.names_a
 
-        self.encoder = StateEncoder(config)
+        self.encoder = StateEncoder(context)
         self.decoders = {var: self.__make_decoder(var)
                          for var in self._akeys}
 
     def __make_decoder(self, var: str):
         decoder = DistributionDecoder(self.dims.actor_critic_hidden,
-                                      self.v(var), self.config)
+                                      self.v(var), self.context)
         self.add_module(f'{var} decoder', decoder)
         return decoder
 
@@ -136,20 +136,31 @@ class Actor(BaseNN):
             da = d.forward(e)
             out[k] = da
         return out
+    
+    def act(self, states: NamedValues, mode=False):
+        s =  Batch.from_sample(self.named_tensors(states))
+        pi = self.forward(s)
+        if mode:
+            a = pi.mode()
+        else:
+            a = pi.sample()
+        a = a.kapply(self.label2raw)
+        a = self.as_numpy(a)
+        return a
 
 
-class PPO(Configured):
-    def __init__(self, config: Config):
-        super().__init__(config)
-        self.args = self.config.rl_args
+class PPO(RLBase):
+    def __init__(self, context: Context):
+        super().__init__(context)
+        self.args = self.config.rl
 
-        self.actor = Actor(config)
-        self._old_actor = Actor(config)
-        self.critic = Critic(config)
+        self.actor = Actor(context)
+        self._old_actor = Actor(context)
+        self.critic = Critic(context)
         self.actor.init_parameters()
         self.critic.init_parameters()
-        self.opt_a = self.F.get_optmizer(self.args.optim_args, self.actor)
-        self.opt_c = self.F.get_optmizer(self.args.optim_args, self.critic)
+        self.opt_a = self.F.get_optmizer(self.args.optim, self.actor)
+        self.opt_c = self.F.get_optmizer(self.args.optim, self.critic)
     
     def __old_actor_update(self):
         for name, param in self.actor.named_parameters():
@@ -184,20 +195,9 @@ class PPO(Configured):
         error = targets - value
 
         return torch.mean(torch.square(error))
-    
-    def act(self, states: NamedValues, mode=False):
-        s =  Batch.from_sample(self.named_tensors(states))
-        pi = self.actor.forward(s)
-        if mode:
-            a = pi.mode()
-        else:
-            a = pi.sample()
-        a = a.kapply(self.label2raw)
-        a = self.as_numpy(a)
-        return a
             
     def optimize(self, buffer: Buffer, log: Optional[u.Log] = None):
-        batchsize = self.args.optim_args.batchsize
+        batchsize = self.args.optim.batchsize
         loss_log = log or u.Log()
 
         # update old actor
@@ -209,7 +209,7 @@ class PPO(Configured):
                 loss = self.critic_loss(data)
                 loss_log['critic'] = float(loss)
                 loss.backward()
-                self.F.optim_step(self.args.optim_args, self.critic,
+                self.F.optim_step(self.args.optim, self.critic,
                                   self.opt_c)
         
         self.critic.compute(buffer)
@@ -219,7 +219,7 @@ class PPO(Configured):
                 loss_log['actor'] = float(loss) 
                 loss_log['entropy'] = entropy
                 loss.backward()
-                self.F.optim_step(self.args.optim_args, self.actor,
+                self.F.optim_step(self.args.optim, self.actor,
                                   self.opt_a)
 
         del buffer[_ADV]

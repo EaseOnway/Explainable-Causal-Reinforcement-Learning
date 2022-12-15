@@ -6,16 +6,16 @@ from .env_net import EnvModelNet
 from core import Env
 from core import Batch, Transitions, Tag
 from ..buffer import Buffer
-from ..base import Configured
+from ..base import RLBase
 
 from utils.typings import NamedTensors, NamedValues
 import utils
 
 
-class SimulatedEnvParallel(Configured):
+class SimulatedEnvParallel(RLBase):
     def __init__(self, net: EnvModelNet, truth_buffer: Buffer,
                  max_trlen: Optional[int] = None):
-        super().__init__(net.config)
+        super().__init__(net.context)
         self.__true_env = net.env
         self.init_buffer = self.__get_init_buffer(truth_buffer)
         self.model = net
@@ -24,7 +24,7 @@ class SimulatedEnvParallel(Configured):
     def __get_init_buffer(self, buffer: Buffer):
         initiated = buffer.transitions[:].initiated.cpu()
         transitions = buffer.transitions[initiated]
-        new_buffer = Buffer(self.config, max_size=transitions.n)
+        new_buffer = Buffer(self.context, max_size=transitions.n)
         new_buffer.append(transitions)
         assert torch.all(new_buffer.transitions[:].initiated)
         return new_buffer

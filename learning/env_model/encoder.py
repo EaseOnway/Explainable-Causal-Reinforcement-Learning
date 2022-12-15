@@ -3,14 +3,13 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from learning.config import Config
-from ..base import BaseNN
+from ..base import BaseNN, Context
 from core import Batch
 
 
 class VariableEncoder(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
         
         self.sub_modules: Dict[str, nn.Module] = {}
 
@@ -42,8 +41,8 @@ class VariableEncoder(BaseNN):
 
 
 class Aggregator(BaseNN):
-    def __init__(self, dim_in: int, dim_out: int, dim_h: int, config: Config):
-        super().__init__(config)
+    def __init__(self, dim_in: int, dim_out: int, dim_h: int, context: Context):
+        super().__init__(context)
 
         self._dim_in = dim_in
         self._dim_out = dim_out
@@ -72,8 +71,8 @@ class Aggregator(BaseNN):
 
 
 class VariableConcat(BaseNN):
-    def __init__(self, config: Config, var_names: Sequence[str]):
-        super().__init__(config)
+    def __init__(self, context: Context, var_names: Sequence[str]):
+        super().__init__(context)
 
         self.__names = tuple(var_names)
         self.__size = sum(self.v(k).size for k in self.__names)

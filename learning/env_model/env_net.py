@@ -9,17 +9,16 @@ import torch.distributions as D
 import random
 
 from core import Batch, Distributions, Transitions
-from ..base import BaseNN
+from ..base import BaseNN, Context
 from .encoder import VariableEncoder, VariableConcat
 from .inferrer import StateKey, DistributionInferrer, DistributionDecoder
 from learning.config import Config
 from utils.typings import NamedTensors, SortedParentDict, NamedArrays, NamedValues
-import utils
 
 
 class EnvModelNet(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
     def forward(self, raw_data: Batch) -> Distributions:
         raise NotImplementedError
@@ -52,19 +51,19 @@ class EnvModelNet(BaseNN):
 
 class CausalNet(EnvModelNet):
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
         self.parent_dic: SortedParentDict = {}
         self.parent_dic_s: SortedParentDict = {}
         self.parent_dic_a: SortedParentDict = {}
 
-        self.encoder = VariableEncoder(config)
+        self.encoder = VariableEncoder(context)
         self.inferrers: Dict[str, DistributionInferrer] = {}
-        self.k_model = StateKey(config)
+        self.k_model = StateKey(context)
 
         for name in self.env.names_outputs:
-            self.inferrers[name] = DistributionInferrer(self.v(name), config)
+            self.inferrers[name] = DistributionInferrer(self.v(name), context)
             self.add_module(f'{name}_inferrer', self.inferrers[name])
     
     def load_graph(self, parent_dic: Dict[str, Set[str]]):
@@ -103,21 +102,21 @@ class CausalNet(EnvModelNet):
 
 class MLPNet(EnvModelNet):
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
-        self.encoder = VariableConcat(config, self.env.names_inputs)
-        dim = config.dims.mlp_model_hidden
+        self.encoder = VariableConcat(context, self.env.names_inputs)
+        dim = self.dims.mlp_model_hidden
         self.mlp = nn.Sequential(
             nn.Linear(self.encoder.size, dim, **self.torchargs),
             nn.LeakyReLU(),
             nn.Linear(dim, dim, **self.torchargs),
         )
         self.decoders: Dict[str, DistributionDecoder] = {}
-        self.k_model = StateKey(config)
+        self.k_model = StateKey(context)
 
         for name in self.env.names_outputs:
-            self.decoders[name] = DistributionDecoder(dim, self.v(name), config)
+            self.decoders[name] = DistributionDecoder(dim, self.v(name), context)
             self.add_module(f'{name}_decoder', self.decoders[name])
 
     def forward(self, raw_data: Batch) -> Distributions:
@@ -134,8 +133,8 @@ class MLPNet(EnvModelNet):
 
 
 class EnvNetEnsemble(EnvModelNet):
-    def __init__(self, config: Config, networks: Tuple[EnvModelNet, ...]):
-        BaseNN.__init__(self, config)
+    def __init__(self, context: Context, networks: Tuple[EnvModelNet, ...]):
+        BaseNN.__init__(self, context)
 
         self.__networks = networks
         for i, network in enumerate(self.__networks):

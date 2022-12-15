@@ -7,8 +7,7 @@ import torch.nn as nn
 
 from learning.env_model.inferrer import DistributionDecoder
 from learning.buffer import Buffer
-from learning.config import Config
-from learning.base import Configured, BaseNN
+from learning.base import BaseNN, Context
 from learning.planning.ppo import PPO, Critic, Actor
 from core import Batch, Transitions, Distributions
 from utils.typings import NamedValues
@@ -17,8 +16,8 @@ import utils as u
 
 
 class VariableConcat(BaseNN):
-    def __init__(self, config: Config, var_names: Sequence[str]):
-        super().__init__(config)
+    def __init__(self, context: Context, var_names: Sequence[str]):
+        super().__init__(context)
 
         self.__names = tuple(var_names)
         self.__size = sum(self.v(k).size for k in self.__names)
@@ -44,15 +43,15 @@ class VariableConcat(BaseNN):
 
 
 class StateEncoder(VariableConcat):
-    def __init__(self, config: Config,
+    def __init__(self, context: Context,
                  restriction: Optional[Iterable[str]] = None):
         if restriction is None:
-            names = config.env.names_s
+            names = context.env.names_s
         else:
             names = sorted(set(restriction))
-        super().__init__(config, names)
+        super().__init__(context, names)
 
-        dim = config.dims.actor_critic_hidden
+        dim = self.dims.actor_critic_hidden
         self.mlp = nn.Sequential(
             nn.Linear(self.size, dim, **self.torchargs),
             nn.LeakyReLU(),
@@ -69,14 +68,14 @@ class StateEncoder(VariableConcat):
 
 
 class SaliencyActor(Actor):
-    def __init__(self, config: Config):
-        BaseNN.__init__(self, config)
+    def __init__(self, context: Context):
+        BaseNN.__init__(self, context)
 
         self._akeys = self.env.names_a
 
-        self.encoder = StateEncoder(config)
+        self.encoder = StateEncoder(context)
 
-        dim = config.dims.actor_critic_hidden
+        dim = self.dims.actor_critic_hidden
         self.mask_decoder = nn.Sequential(
             nn.Linear(dim, dim, **self.torchargs),
             nn.LeakyReLU(),
@@ -88,7 +87,7 @@ class SaliencyActor(Actor):
 
     def __make_decoder(self, var: str):
         decoder = DistributionDecoder(self.dims.actor_critic_hidden,
-                                      self.v(var), self.config)
+                                      self.v(var), self.context)
         self.add_module(f'{var} decoder', decoder)
         return decoder
 

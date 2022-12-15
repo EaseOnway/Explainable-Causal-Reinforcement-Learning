@@ -10,17 +10,16 @@ from learning.env_model.encoder import VariableConcat
 from core.data import Batch
 from utils.typings import NamedValues
 import utils
-from learning.config import Config
-from learning.base import BaseNN
+from learning.base import BaseNN, Context
 
 
 class QNet(BaseNN):
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(self, context: Context):
+        super().__init__(context)
 
-        self.varcat = VariableConcat(config, config.env.names_inputs)
+        self.varcat = VariableConcat(context, context.env.names_inputs)
 
-        dim = config.baseline.dim_q_hidden
+        dim = self.config.baseline.dim_q_hidden
         self.mlp = nn.Sequential(
             nn.Linear(self.varcat.size, dim, **self.torchargs),
             nn.LeakyReLU(),

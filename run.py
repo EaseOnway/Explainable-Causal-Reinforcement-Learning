@@ -1,7 +1,6 @@
 from typing import Dict, Callable, Any, List
 import torch
 import numpy as np
-from envs import SC2BuildMarine
 import learning
 import learning.config as cfg
 from learning import Explainner
@@ -25,7 +24,6 @@ def command(func: Callable[[List[str]], Callable]):
     doc = func.__doc__ or "no document"
     _doc_commands[name] = doc
     return func
-
 
 
 @command
@@ -103,7 +101,6 @@ def model_free(argv: List[str]):
     parser.add_argument('env', type=str, help="environment name")
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--dir', type=str, default=None)
-    parser.add_argument('--resume', action='store_true', default=False)
     parser.add_argument('--n-step', type=int, default=300)
     parser.add_argument('--store-buffer', action='store_true', default=False)
 
@@ -199,6 +196,7 @@ def explain(argv):
         a = trainer.env.action_of(tran)
 
         if not args.baseline:
+            trainer.load_items('agent', 'env-model')
             e = Explainner(trainer)
             e.why(s, a,
                   mode=True, thres=args.thres, maxlen=args.len, complete=True)
