@@ -9,10 +9,9 @@ import torch.distributions as D
 import random
 
 from core import Batch, Distributions, Transitions
-from ..base import BaseNN, Context
+from ..base import BaseNN, Context, RLBase
 from .encoder import VariableEncoder, VariableConcat
 from .inferrer import StateKey, DistributionInferrer, DistributionDecoder
-from learning.config import Config
 from utils.typings import NamedTensors, SortedParentDict, NamedArrays, NamedValues
 
 
@@ -132,33 +131,37 @@ class MLPNet(EnvModelNet):
         return outs
 
 
-class EnvNetEnsemble(EnvModelNet):
+class ModelEnsemble(EnvModelNet):
     def __init__(self, context: Context, networks: Tuple[EnvModelNet, ...]):
-        BaseNN.__init__(self, context)
+        super().__init__(context)
 
-        self.__networks = networks
-        for i, network in enumerate(self.__networks):
-            if isinstance(network, EnvNetEnsemble):
+        self.networks = networks
+        for i, network in enumerate(self.networks):
+            if isinstance(network, ModelEnsemble):
                 raise TypeError("we do not accept an ensemble as a sub-network")
-            self.add_module(f"network_{i}", network)
+            self.add_module(f'model_{i}', network)
+
+        self.optimzers = [self.F.get_optmizer(self.config.model.optim, net)
+                          for net in self.networks]
     
     def __getitem__(self, i: int):
-        return self.__networks[i]
+        return self.networks[i]
     
     def __len__(self):
-        return len(self.__networks)
+        return len(self.networks)
     
     def __iter__(self):
-        return iter(self.__networks)
+        return iter(self.networks)
 
     def load_graph(self, parent_dic: Dict[str, Set[str]]):
-        for network in self.__networks:
+        for network in self.networks:
             if isinstance(network, CausalNet):
                 network.load_graph(parent_dic)
-    
-    def get_random_net(self):
-        return random.choice(self.__networks)
+
+    def random_select(self):
+        i = random.randrange(len(self.networks))
+        return self.networks[i], self.optimzers[i]
     
     def forward(self, raw_data: Batch) -> Distributions:
-        net = self.get_random_net()
+        net, _ = self.random_select()
         return net.forward(raw_data)

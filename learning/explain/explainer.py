@@ -8,7 +8,7 @@ from ..base import RLBase
 
 from core import Env, Transitions
 
-from learning.env_model import EnvNetEnsemble, CausalNet
+from learning.env_model import ModelEnsemble, CausalNet
 
 
 from .explanan import CausalChain
@@ -20,11 +20,11 @@ class Explainner(RLBase):
 
         self.trainer = trainer
 
-        net = trainer.envnet
+        net = trainer.models
         if isinstance(net, CausalNet):
             self.causnet = net
-        elif isinstance(net, EnvNetEnsemble):
-            net = net.get_random_net()
+        elif isinstance(net, ModelEnsemble):
+            net, _ = net.random_select()
             if not isinstance(net, CausalNet):
                 raise TypeError
             self.causnet = net

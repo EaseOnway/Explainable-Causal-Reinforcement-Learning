@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set, L
 import numpy as np
 import torch
 
-from ..env_model import SimulatedEnv, EnvNetEnsemble, CausalNet
+from ..env_model import SimulatedEnv, ModelEnsemble, CausalNet
 from ..planning import Actor
 from ..train import Train
 from utils.typings import NamedValues, SortedNames

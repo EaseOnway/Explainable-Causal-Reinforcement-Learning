@@ -27,7 +27,8 @@ def make_config(env_name: str, model_based: bool,
     config.model.optim.max_grad_norm = 1.0
     config.mbrl.explore_rate_max = 0.5
     config.mbrl.n_round_planning = 20
-    config.mbrl.interval_graph_update = 5
+    config.mbrl.interval_graph_update = 3
+    config.mbrl.ensemble_size = 5 if model_based else 1
 
     if env_name == 'cartpole':
         config.rl.n_sample = 1024
@@ -38,13 +39,12 @@ def make_config(env_name: str, model_based: bool,
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.mbrl.n_batch_fit =  512
-        config.mbrl.n_batch_fit_new_graph = 2048
+        config.mbrl.n_batch_fit =  400
+        config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 512
         config.mbrl.n_sample_exploit = 512
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 20)
-        config.mbrl.ensemble_size = 4
         config.model.n_jobs_fcit = 16
     elif env_name == 'collect':
         config.rl.n_sample = 128
@@ -55,13 +55,12 @@ def make_config(env_name: str, model_based: bool,
         config.rl.max_episode_length = 128
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.mbrl.n_batch_fit =  512
-        config.mbrl.n_batch_fit_new_graph = 2048
+        config.mbrl.n_batch_fit =  400
+        config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (1, 20)
-        config.mbrl.ensemble_size = 4
+        config.mbrl.rollout_length = (1, 5)
         config.model.n_jobs_fcit = 16
     elif env_name == 'buildmarine':
         config.rl.n_sample = 128
@@ -77,8 +76,7 @@ def make_config(env_name: str, model_based: bool,
         config.mbrl.n_sample_explore = 64
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (1, 20)
-        config.mbrl.ensemble_size = 4
+        config.mbrl.rollout_length = (1, 5)
         config.model.n_jobs_fcit = 16
     elif env_name == 'lunarlander':
         config.rl.n_sample = 2048
@@ -95,7 +93,6 @@ def make_config(env_name: str, model_based: bool,
         config.mbrl.n_sample_exploit = 1024
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 20)
-        config.mbrl.ensemble_size = 4
         config.model.n_jobs_fcit = 16
     else:
         raise ValueError(f"unknown environment: {env_name}")

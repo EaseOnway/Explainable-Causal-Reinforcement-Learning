@@ -12,7 +12,7 @@ from core import Batch, Transitions, Tag
 from .buffer import Buffer
 from .causal_discovery import discover
 from .env_model import SimulatedEnvParallel, CausalNet, MLPNet,\
-    EnvNetEnsemble, EnvModelNet
+    ModelEnsemble, EnvModelNet
 from .config import Config
 from .base import RLBase, Context
 from .planning import PPO, Actor
@@ -58,18 +58,15 @@ class Train(RLBase):
         self.show_plot = (showinfo == 'plot')
 
         # causal graph, env model, and model optimizer
+
+
         def get_env_net() -> EnvModelNet:
             if self.config.ablations.mlp:
                 return MLPNet(context)
             else:
                 return CausalNet(context)
-        self.__causal_graph: ParentDict
-        if self.config.mbrl.ensemble_size <= 1:
-            self.envnet = get_env_net()
-        else:
-            _nets = (get_env_net() for _ in range(self.config.mbrl.ensemble_size))
-            self.envnet = EnvNetEnsemble(context, tuple(_nets))
-        self.causopt = self.F.get_optmizer(self.config.model.optim, self.envnet)
+        _nets = (get_env_net() for _ in range(self.config.mbrl.ensemble_size))
+        self.models = ModelEnsemble(context, tuple(_nets))
 
         # planning algorithm
         self.ppo = PPO(context)
@@ -100,9 +97,7 @@ class Train(RLBase):
     def causal_graph(self, graph: ParentDict):
         self.__causal_graph = graph
         if not self.config.ablations.mlp:
-            assert(isinstance(self.envnet, CausalNet) or
-                   isinstance(self.envnet, EnvNetEnsemble))
-            self.envnet.load_graph(self.__causal_graph)
+            self.models.load_graph(self.__causal_graph)
 
     def collect(self, buffer: Buffer, n_sample: int, explore_rate: Optional[float],
                 reward_scaling: bool, actor: Optional[Actor] = None):
@@ -168,7 +163,7 @@ class Train(RLBase):
         log = Log()
 
         batchsize = self.config.mbrl.dream_batch_size
-        env_m = SimulatedEnvParallel(self.envnet, self.buffer_m, len_rollout)
+        env_m = SimulatedEnvParallel(self.models, self.buffer_m, len_rollout)
         env_m.reset(batchsize)
         
         tr: List[Transitions] = []
@@ -234,7 +229,7 @@ class Train(RLBase):
     def __init_params(self):
         self.ppo.actor.init_parameters()
         self.ppo.critic.init_parameters()
-        self.envnet.init_parameters()
+        self.models.init_parameters()
         self.causal_graph = {j: {i for i in self.env.names_inputs
                                  if utils.Random.event(self.config.model.prior)}
                              for j in self.env.names_outputs}
@@ -253,7 +248,7 @@ class Train(RLBase):
             torch.save({'actor': self.ppo.actor.state_dict(),
                         'critic': self.ppo.critic.state_dict()}, path)
         elif key == 'env-model':
-            torch.save({'inference-network': self.envnet.state_dict(),
+            torch.save({'inference-network': self.models.state_dict(),
                         'causal-graph': self.__causal_graph}, path)
         elif key == 'causal-graph':
             torch.save(self.__causal_graph, path)
@@ -274,7 +269,7 @@ class Train(RLBase):
             self.ppo.actor.load_state_dict(saved['actor'])
             self.ppo.critic.load_state_dict(saved['critic'])
         elif key == 'env-model':
-            self.envnet.load_state_dict(saved['inference-network'])
+            self.models.load_state_dict(saved['inference-network'])
             self.causal_graph = saved['causal-graph']
         elif key == 'causal-graph':
             self.causal_graph = saved
@@ -345,13 +340,13 @@ class Train(RLBase):
                             self.rl_args.use_reward_scaling)
 
     def __fit_batch(self, transitions: Transitions, eval=False):
-        lls = self.envnet.get_loglikeli_dic(transitions)
-        ll = self.envnet.loglikelihood(lls)
+        net, opt = self.models.random_select()
+        lls = net.get_loglikeli_dic(transitions)
+        ll = net.loglikelihood(lls)
         loss = -ll
         if not eval:
             loss.backward()
-            self.F.optim_step(self.config.model.optim,
-                              self.envnet, self.causopt)
+            self.F.optim_step(self.config.model.optim, net, opt)
         return float(loss), {k: float(e) for k, e in lls.items()}
 
     def __fit_epoch(self, buffer: Buffer, log: Log, eval=False):
@@ -379,7 +374,7 @@ class Train(RLBase):
         batch_size = self.config.model.optim.batchsize
 
         print(f"start fitting...")
-        self.envnet.train(True)
+        self.models.train(True)
         for i_batch in range(n_batch):
             batch = self.buffer_m.sample_batch(batch_size)
             nll, loglikelihoods = self.__fit_batch(batch, eval=False)
@@ -403,7 +398,7 @@ class Train(RLBase):
                     break
 
         # evaluate
-        self.envnet.train(False)
+        self.models.train(False)
         eval_log = Log()
         self.__fit_epoch(self.buffer_m, eval_log, eval=True)
         
@@ -582,7 +577,7 @@ class Train(RLBase):
 
             # causal_reasoning
             self.causal_discovery()
-            self.envnet.init_parameters()
+            self.models.init_parameters()
             self.fit(n_batch, -1)
 
             # eval

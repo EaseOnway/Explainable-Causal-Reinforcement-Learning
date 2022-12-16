@@ -22,8 +22,10 @@ class SimulatedEnvParallel(RLBase):
         self.k = len_rollout
 
     def __transit(self, states_and_actions: Batch):
-        out = self.net.forward(states_and_actions)
-        return out.sample().kapply(self.label2raw)
+        with torch.no_grad():
+            out = self.net.forward(states_and_actions)
+            out = out.sample().kapply(self.label2raw)
+        return out
 
     def __complete_transition(self, transition: Batch):
         r = np.empty(transition.n, float)
