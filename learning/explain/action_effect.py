@@ -17,17 +17,14 @@ import core.scm as scm
 
 class ActionEffect(RLBase):
     def __init__(self, network: CausalNet, action: NamedValues,
-                 intervened_names: Optional[Set[str]] = None):
+                 interest: Optional[Set[str]] = None):
 
         super().__init__(network.context)
 
         self.network = network
         self.action = action
-
-        if intervened_names is None:
-            self.intervened = None
-        else:
-            self.intervened = {name: action[name] for name in intervened_names}
+        
+        self.interest = interest
 
         for a in self.env.names_a:
             if a not in action:
@@ -65,13 +62,13 @@ class ActionEffect(RLBase):
                 weight_s = self.T.t2a(attn[0].view(len(parents_s)))
                 weight_a = float(attn[1].view(()))
 
-                if self.intervened is not None and \
-                        len(set(parents_a) & self.intervened.keys()) == 0:
+                if self.interest is not None and \
+                        len(set(parents_a) & self.interest) == 0:
                     causal_weights[var] = {i: 0. for i in parents_s}
                     causal_weight_action[var] = 0.
                 else:
                     causal_weights[var] = {i: float(w) for i, w
-                                           in zip(parents_s, weight_s)}
+                                            in zip(parents_s, weight_s)}
                     causal_weight_action[var] = float(weight_a)
 
         self.__action_enc = action_enc

@@ -1,9 +1,6 @@
 from typing import Any, Dict, Sequence, Optional, Set, Tuple, final, Callable, List
 import abc
-from utils import Shaping
 import core.vtype as vtype
-from core.data import Batch
-from enum import Enum
 from utils.typings import NamedValues, SortedNames
 
 
@@ -136,8 +133,7 @@ class Env(abc.ABC):
         reward = self.reward(variables)
         
         if not terminated:
-            self.__current_state = {name: variables[Env.name_next(name)]
-                                    for name in self.names_s}
+            self.__current_state = self.state_shift(variables)
             self.__t += 1
         else:
             self.reset()
@@ -248,6 +244,9 @@ class Env(abc.ABC):
 
     def outcomes_of(self, variables: NamedValues) -> NamedValues:
         return {k: variables[k] for k in self.__names_o}
+    
+    def state_shift(self, variables: NamedValues) -> NamedValues:
+        return {s: variables[s_] for s, s_ in self.nametuples_s}
 
     def texts(self, variables: NamedValues):
         return {k: self.__vtypes[k].text(v)

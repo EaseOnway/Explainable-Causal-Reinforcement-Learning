@@ -1,5 +1,5 @@
 from typing import Dict, Callable, Any, List
-import torch
+import random
 import numpy as np
 import learning
 import learning.config as cfg
@@ -182,6 +182,7 @@ def explain(argv):
     parser.add_argument('--thres', type=float, default=0.1)
     parser.add_argument('--len', type=int, default=5)
     parser.add_argument('--baseline', action='store_true', default=False)
+    parser.add_argument('--to', type=str, default=None)
     args = parser.parse_args(argv)
 
     def main(_):
@@ -190,19 +191,21 @@ def explain(argv):
         trainer.init_run(args.dir)
         # trainer.plot_causal_graph().view()
 
-        trainer.warmup(5, 0)
-        tran = trainer.buffer_m.arrays[3]
-        s = trainer.env.state_of(tran)
-        a = trainer.env.action_of(tran)
+        trainer.load_item('agent')
+        trainer.warmup(500, 0)
+        trans = trainer.buffer_m.transitions[50: 60]
 
         if not args.baseline:
-            trainer.load_items('agent', 'env-model')
+            trainer.load_item('env-model')
             e = Explainner(trainer)
-            e.why(s, a,
-                  mode=True, thres=args.thres, maxlen=args.len, complete=True)
-            e.whynot(s, trainer.env.random_action(),
-                     mode=True, thres=args.thres, maxlen=args.len)
+            to = set(x.strip(' ') for x in args.to.split(',')) if args.to is not None else None
+            e.why(trans, mode=True, thres=args.thres, maxlen=args.len, to=to)
+            e.whynot(trans, trainer.env.random_action(),
+                     mode=True, thres=args.thres, maxlen=args.len, to=to)
         else:
+            tran = trans.at(0)
+            s = trainer.env.state_of(tran.variables)
+            a = trainer.env.action_of(tran.variables)
             e = BaselineExplainner(trainer)
             e.load()
             e.why(s, a)

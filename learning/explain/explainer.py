@@ -1,14 +1,17 @@
-from typing import Optional, Sequence, List
+from typing import Optional, List, Set, Union, Tuple
 
 import numpy as np
-import torch
 
 from ..train import Train
 from utils.typings import NamedValues
 from ..base import RLBase
 
+from core import Env, Transitions
 
-from .explanan import TrajectoryGenerator
+from learning.env_model import EnvNetEnsemble, CausalNet
+
+
+from .explanan import CausalChain
 
 class Explainner(RLBase):
 
@@ -16,69 +19,77 @@ class Explainner(RLBase):
         super().__init__(trainer.context)
 
         self.trainer = trainer
-        self.causnet = trainer.envnet
+
+        net = trainer.envnet
+        if isinstance(net, CausalNet):
+            self.causnet = net
+        elif isinstance(net, EnvNetEnsemble):
+            net = net.get_random_net()
+            if not isinstance(net, CausalNet):
+                raise TypeError
+            self.causnet = net
+        else:
+            raise TypeError
+        
+        self.actor = trainer.ppo.actor
  
-    def why(self, state: NamedValues, action: NamedValues,
-            maxlen: Optional[int] = None,
-            thres=0.1, mode=False, complete=False):
+    def build_chain(self, 
+            startup: Union[Transitions, NamedValues, Tuple[NamedValues, NamedValues]],
+            maxlen: int, from_: Optional[Set[str]] = None, to: Optional[Set[str]] = None,
+            thres=0.1, mode=False):
+
+        ch = CausalChain(self.causnet, thres, from_, to, mode)
+        if isinstance(startup, dict):
+            ch.start(startup, self.actor)
+        elif isinstance(startup, tuple):
+            s, a = startup
+            ch.start(s, a)
+        else:
+            for i in range(min(maxlen, startup.n)):
+                transition = startup.at(i)
+                ch.step(transition)
+
+        while ch.t < (maxlen or 9999):
+            ch.follow(self.actor)
+            if ch.terminated:
+                break
+        
+        return ch
+
+    def why(self, trajectory: Transitions, from_: Optional[Set[str]] = None,
+            to: Optional[Set[str]] = None, maxlen: Optional[int] = None,
+            thres=0.1, complete=True, mode=False):
+        
+        np.set_printoptions(precision=5)
+        maxlen = maxlen or trajectory.n
+        chain = self.build_chain(trajectory, maxlen, from_, to, thres, mode)
+
+        for t in range(len(chain)):
+            print(chain.explain(t, complete))
+        chain.summarize()
+        chain.plot(False).view()
+
+    def whynot(self, trajectory: Transitions, action_cf: NamedValues,
+               to: Optional[Set[str]] = None, maxlen: Optional[int] = None,
+               thres=0.1, mode=False, complete=True, eps=1e-3):
 
         np.set_printoptions(precision=5)
 
-        trgen = TrajectoryGenerator(self.trainer, thres, mode=mode)
-        trgen.reset(state)
-        trgen.intervene(action)
-            
-        for i in range(maxlen or 99999):
-            transition = trgen.step()
-            if transition is None:
-                break
-            if len(trgen.causal_chain.next_vnodes) == 0:
-                break
-        
-        for t in range(len(trgen.causal_chain)):
-            print(trgen.causal_chain.explain(t, complete))
-        trgen.causal_chain.summarize()
-        
+        maxlen = maxlen or trajectory.n
+        from_ = set(action_cf.keys())
+        variables = trajectory.at(0).variables
+        state = self.env.state_of(variables)
+        action = self.env.action_of(variables)
+        chain = self.build_chain((state, action), maxlen, from_, to, thres, mode)
 
-    def whynot(self, state: NamedValues, action_cf: NamedValues,
-               action_f: Optional[NamedValues] = None,
-               maxlen: Optional[int] = None, thres=0.1, mode=False, 
-               complete=False, eps=1e-3):
+        action.update(action_cf)
+        chain_cf = self.build_chain((state, action), maxlen, from_, to, thres, mode)
 
-        np.set_printoptions(precision=5)
-
-        trgen_f = TrajectoryGenerator(self.trainer, thres, mode=mode)
-        trgen_cf = TrajectoryGenerator(self.trainer, thres, mode=mode)
-        trgen_f.reset(state)
-        trgen_cf.reset(state)
-
-        if action_f is None:
-            action_f = self.trainer.ppo.actor.act(state, mode=True)
-        trgen_f.intervene({k: action_f[k] for k in action_cf})
-        trgen_cf.intervene(action_cf)
-
-        for i in range(maxlen or 99999):
-            transition = trgen_f.step()
-            if transition is None:
-                break
-            if len(trgen_f.causal_chain.next_vnodes) == 0:
-                break
-        
-        for i in range(maxlen or 99999):
-            transition = trgen_cf.step()
-            if transition is None:
-                break
-            if len(trgen_cf.causal_chain.next_vnodes) == 0:
-                break
-        
-        chain_f = trgen_f.causal_chain
-        chain_cf = trgen_cf.causal_chain
-
-        for t in range(max(len(chain_f), len(chain_cf))):
-            print(chain_f.compare(t, chain_cf, eps, complete))
+        for t in range(max(len(chain), len(chain_cf))):
+            print(chain.compare(t, chain_cf, eps, complete))
 
         print("[Factual] ", sep='')
-        chain_f.summarize()
+        chain.summarize()
 
         print("[Counterfactual] ", sep='')
         chain_cf.summarize()

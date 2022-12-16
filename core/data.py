@@ -9,6 +9,7 @@ import torch.distributions as D
 import enum
 from utils import TensorOperator as T
 from utils.typings import NamedTensors
+from .env import Env
 
 
 class Batch():
@@ -89,6 +90,7 @@ class Tag(enum.Enum):
 
 
 class Transitions(Batch):
+    '''Transition Batch'''
 
     def __init__(self, data: Dict[str, Tensor], rewards: Tensor,
                  tagcode: Tensor):
@@ -128,6 +130,16 @@ class Transitions(Batch):
     def to(self, device: torch.device):
         return Transitions({k: v.to(device) for k, v in self.data.items()},
                            self.rewards.to(device), self.tagcode.to(device))
+    
+    def at(self, i: int):
+        return Env.Transition(
+           {k: v[i].cpu().numpy() for k, v in self.items()},
+           float(self.rewards[i]),
+           bool(self.tagcode[i] & Tag.TERMINATED.mask),
+        )
+    
+    def iter_by_step(self):
+        return iter(self.at(i) for i in range(self.n))
 
 
 class Distributions:

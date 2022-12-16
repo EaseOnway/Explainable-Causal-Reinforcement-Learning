@@ -36,6 +36,7 @@ TORCH_DTYPE_MAP = {
     
 
 EPSILON = 1e-5
+DECIMAL = 4
 
 
 class VType(abc.ABC):
@@ -137,6 +138,9 @@ class ContinuousBase(VType):
     @property
     def dtype(self):
         return DType.Real
+
+    def text(self, value: Any) -> str:
+        return str(np.round(value, DECIMAL))
 
     def raw2input(self, batch: torch.Tensor):
         return batch.view(batch.shape[0], -1)

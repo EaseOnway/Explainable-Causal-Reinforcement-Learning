@@ -4,24 +4,29 @@ import numpy as np
 import torch
 
 from ..env_model import SimulatedEnv, EnvNetEnsemble, CausalNet
+from ..planning import Actor
 from ..train import Train
 from utils.typings import NamedValues, SortedNames
 from core import Env
 
 from .action_effect import ActionEffect
+import utils
 
 
 _ACTION_EFFECT = "__action_effect__"
 
+np.set_printoptions(precision=5)
+
 
 class CausalNode:
-    def __init__(self, name: str, value: Any, t: int, is_reward=False):
+    def __init__(self, name: str, value: Any, t: int, is_reward: bool):
         self.name = name
         self.value = value
         self.t = t
         self.parents: List[CausalNode] = []
         self.is_reward = is_reward
-        self.in_chain = is_reward
+        self.reached = False
+        self.in_chain = False
         self.is_tail = False
 
     def __back(self):
@@ -33,13 +38,17 @@ class CausalNode:
     
     def add_parent(self, node: "CausalNode"):
         self.parents.append(node)
-        if self.in_chain:
-            if not node.in_chain:
-                node.in_chain = True
-                node.__back()
-        if self.is_reward:
-            node.is_tail = True
+        if node.reached:
+            self.reached = True
     
+    def propagate(self):
+        self.in_chain = True
+        for parent in self.parents:
+            if parent.reached and not parent.in_chain:
+                parent.propagate()
+            if self.is_reward:
+                parent.is_tail = True
+
     def __str__(self):
         return f"{self.name} = {self.value} [t={self.t}, in_chain={self.in_chain}]"
     
@@ -48,17 +57,22 @@ class CausalNode:
 
 
 class CausalChain:
-    def __init__(self, env: Env, init_states: NamedValues, thres: float, discount: float):
-        self._variable_nodes: List[Dict[str, CausalNode]] = [dict()]
-        self._reward_nodes: List[Dict[str, CausalNode]] = [dict()]
+    def __init__(self, net: CausalNet, thres: float,
+                 from_: Optional[Set[str]] = None,
+                 to: Optional[Set[str]] = None,
+                 mode=True):
+        self._variable_nodes: List[Dict[str, CausalNode]] = []
+        self._reward_nodes: List[Dict[str, CausalNode]] = []
         self._transitions: List[Env.Transition] = []
         self._actions: List[NamedValues] = []
         self._thres = thres
-        self._env = env
-        self._discount = discount
-        for name, value in init_states.items():
-            self.next_vnodes[name] = CausalNode(name, value, 0)
-    
+        self._net = net
+        self._mode = mode
+        self._env = net.env
+        self._discount = net.config.rl.discount
+        self.__from = from_ or set(self._env.names_a)
+        self.__to = to or set(self._env.rewarders.keys())
+
     @property
     def next_vnodes(self):
         return self._variable_nodes[-1]
@@ -71,49 +85,83 @@ class CausalChain:
     def t(self):
         return len(self._transitions)
     
+    @property
+    def terminated(self):
+        return self.t > 0 and self._transitions[-1].terminated
+    
     def __len__(self):
         return len(self._transitions)
     
     def step(self, transition: Env.Transition):
-        ae: ActionEffect = transition.info[_ACTION_EFFECT]
+        assert not self.terminated
+        if self.t == 0:
+            ae = ActionEffect(self._net, self._env.action_of(transition.variables),
+                              self.__from)
+            self._variable_nodes.append({})
+            self._reward_nodes.append({})
+            for name in self._env.names_s:
+                value = transition.variables[name]
+                node = CausalNode(name, value, 0, False)
+                node.reached = True
+                self.next_vnodes[name] = node
+        else:
+            ae = ActionEffect(self._net, self._env.action_of(transition.variables))
 
         for name_out in self._env.names_o:
-            node = CausalNode(name_out, transition.variables[name_out], self.t)
-            flag = ae[name_out] >= self._thres
+            node = CausalNode(name_out, transition.variables[name_out], self.t, False)
             for name_in in ae.who_cause(name_out):
                 if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
                     node.add_parent(self.next_vnodes[name_in])
-                    flag = True
-            if flag:
-                self.next_vnodes[name_out] = node
+            if self.t == 0 and ae[name_out] >= self._thres:
+                node.reached = True
+            self.next_vnodes[name_out] = node
 
         next_dict: Dict[str, CausalNode] = {}
 
         for name_s, name_out in self._env.nametuples_s:
-            node = CausalNode(name_s, transition.variables[name_out], self.t + 1)
-            flag = ae[name_out] >= self._thres
+            node = CausalNode(name_s, transition.variables[name_out], self.t + 1, False)
             for name_in in self._env.names_s:
                 if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
                     node.add_parent(self.next_vnodes[name_in])
-                    flag = True
-            if flag:
-                self.next_vnodes[name_out] = node
-                next_dict[name_s] = node
+            if self.t == 0 and ae[name_out] >= self._thres:
+                node.reached = True
+            self.next_vnodes[name_out] = node
+            next_dict[name_s] = node
 
         for label, rewarder in self._env.rewarders.items():
-            sources = set(rewarder.source) & self.next_vnodes.keys()
-            if len(sources) == 0:
-                continue
             r = rewarder(transition.variables)
             node = CausalNode(label, r, self.t, True)
-            for source in sources:
+            for source in rewarder.source:
                 node.add_parent(self.next_vnodes[source])
             self.next_rnodes[label] = node
+            if node.name in self.__to and node.reached:
+                node.propagate()
         
         self._actions.append(ae.action)
         self._transitions.append(transition)
         self._variable_nodes.append(next_dict)
         self._reward_nodes.append(dict())
+    
+    def __simulate(self, s: NamedValues, a: Union[NamedValues, Actor]):
+        variables = s.copy()
+        if isinstance(a, Actor):
+            a = a.act(variables, self._mode)
+        variables.update(a)
+        outs = self._net.simulate(variables, self._mode)
+        variables.update(outs)
+        terminated = self._env.terminated(variables)
+        reward = self._env.reward(variables)
+        return Env.Transition(variables, reward, terminated)
+
+    def follow(self, a: Union[NamedValues, Actor]):
+        assert self.t > 0
+        s = self._env.state_shift(self._transitions[-1].variables)
+        transition = self.__simulate(s, a)
+        self.step(transition)
+    
+    def start(self, s: NamedValues, a: Union[NamedValues, Actor]):
+        transition = self.__simulate(s, a)
+        self.step(transition)
 
     def __get_intervals(self, t: int, names: SortedNames, complete=True):
             out: List[CausalNode] = []
@@ -165,12 +213,12 @@ class CausalChain:
             for s in interval_nextstates:
                 lines.append(f"|\t|\t{s.name} = {self.__text(s)} ")
 
-        rewards = self._reward_nodes[t]
+        rewards = [n for n in self._reward_nodes[t].values() if n.in_chain]
         discount = self._discount**t
         if len(rewards) > 0:
             lines.append("|\tTherefore, we obtained rewards (discounted by %.4f)" % discount)
-            for label, reward in rewards.items():
-                lines.append(f"|\t|\t{reward.value * discount} due to {label}")
+            for node in rewards:
+                lines.append("|\t|\t%.5f due to %s" % (node.value * discount, node.name))
 
         if self._transitions[t].terminated:
             lines.append(f"|\tFinally, The episode terminates.")
@@ -201,6 +249,8 @@ class CausalChain:
     def __get_rnode(self, t: int, name: str):
         try:
             node = self._reward_nodes[t][name]
+            if not node.in_chain:
+                return None
         except IndexError:
             return None
         except KeyError:
@@ -241,9 +291,10 @@ class CausalChain:
                 elif y is not None and x is None:
                     lines.append(ind + f"{y.value * discount} (factual only) due to {name}")
                 elif x is not None and y is not None:
-                    if not abs(x.value - y.value) > eps:
-                        lines.append(ind + f"{x.value * discount} (factual) other than " +
-                                     f"{y.value * discount} (counterfactural) due to {name}")
+                    if abs(x.value - y.value) > eps:
+                        lines.append(ind + 
+                            "%.5f (factual) other than " % (x.value * discount) +
+                            "%.5f (counterfactural) due to %s" % (y.value * discount, name))
 
             return lines
 
@@ -332,62 +383,58 @@ class CausalChain:
                 for s in nodes:
                     print(f"|\t{s.name} = {self.__text(s)} ")
 
-class TrajectoryGenerator:
-    def __init__(self, trainer: Train, thres: float, mode=False):
-        self.env: SimulatedEnv
-        self.mode = mode
-        self.trainer = trainer
-        self.thres = thres
-        self.discount = trainer.config.rl.discount
+    def plot(self, only_chain=True):
+        from graphviz import Digraph
 
-        if isinstance(self.trainer.envnet, EnvNetEnsemble):
-            envnet = self.trainer.envnet.get_random_net()
-        else:
-            envnet = self.trainer.envnet
-        if not isinstance(envnet, CausalNet):
-            raise TypeError("Require causal enviornment model")
-        self.envnet = envnet
+        g = Digraph("causal chain")
+
+        def node_id(node: CausalNode):
+            if node.is_reward:
+                return f"reward({node.name})[{node.t}]"
+            else:
+                return f"{node.name}[{node.t}]"
         
-        self.__action: Optional[NamedValues]
-        self.__terminated: bool
-        self.__step: int
-        self.__discount: float
-        self.__causal_chain: CausalChain
+        def node_label(node: CausalNode):
+            if node.is_reward:
+                return f"{node.name}[{node.t}]\n{round(node.value, 5)}"
+            else:
+                return f"{node.name}[{node.t}]\n" + \
+                    f"{self._env.var(node.name).text(node.value)}"
 
-    def reset(self, state: NamedValues):
-        self.env = SimulatedEnv(self.envnet, state, self.mode)
-        self.env.reset()
-
-        self.__terminated = False
-        self.__action = None
-        self.__step = 0
-        self.__discount = 1.0
-        self.__causal_chain = CausalChain(self.trainer.env, 
-            state, self.thres, self.discount)
-
-    def intervene(self, action: NamedValues):
-        self.__action = action
-
-    def step(self):
-        if self.__terminated:
-            return None
-        else:
-            a = self.trainer.ppo.actor.act(self.env.current_state, mode=self.mode)
-            partial = None
-            if self.__action is not None:
-                partial = set(self.__action.keys())
-                a.update(self.__action)
-                self.__action = None 
-            transition = self.env.step(a)
-            self.__terminated = transition.terminated
+        def set_node(node: CausalNode):
             
-            ae = ActionEffect(self.envnet, a, partial)
-            transition.info[_ACTION_EFFECT] = ae
-            self.__causal_chain.step(transition)
-            self.__step += 1
-            self.__discount *= self.discount
-            return transition
+            if only_chain and not node.in_chain:
+                return
+            
+            attr = {}
+            if node.in_chain:
+                attr['color'] = 'green'
+            
+            if node.is_reward:
+                attr['shape'] = 'hexagon'
+            else:
+                attr['shape'] = 'box'
+            
+            g.node(node_id(node), node_label(node), **attr)
+            
+            for parent in node.parents:
+                if only_chain and not parent.in_chain:
+                    continue
+                if node.in_chain and parent.in_chain:
+                    g.edge(node_id(parent), node_id(node), color='green')
+                else:
+                    g.edge(node_id(parent), node_id(node))
 
-    @property
-    def causal_chain(self):
-        return self.__causal_chain
+        # nodes
+        for t in range(len(self)):
+            nodes = self._variable_nodes[t]
+            if t == 0:
+                for name in self._env.names_s:
+                    set_node(nodes[name])
+            for name in self._env.names_outputs:
+                set_node(nodes[name])
+
+            for r in self._reward_nodes[t].values():
+                set_node(r)
+
+        return g

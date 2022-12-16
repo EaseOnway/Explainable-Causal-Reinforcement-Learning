@@ -13,24 +13,16 @@ import utils
 
 
 class SimulatedEnvParallel(RLBase):
-    def __init__(self, net: EnvModelNet, truth_buffer: Buffer,
-                 max_trlen: Optional[int] = None):
+    def __init__(self, net: EnvModelNet, env_buffer: Buffer,
+                 len_rollout: Optional[int] = None):
         super().__init__(net.context)
         self.__true_env = net.env
-        self.init_buffer = self.__get_init_buffer(truth_buffer)
-        self.model = net
-        self.max_trlen = max_trlen
-    
-    def __get_init_buffer(self, buffer: Buffer):
-        initiated = buffer.transitions[:].initiated.cpu()
-        transitions = buffer.transitions[initiated]
-        new_buffer = Buffer(self.context, max_size=transitions.n)
-        new_buffer.append(transitions)
-        assert torch.all(new_buffer.transitions[:].initiated)
-        return new_buffer
+        self.env_buffer = env_buffer
+        self.net = net
+        self.k = len_rollout
 
     def __transit(self, states_and_actions: Batch):
-        out = self.model.forward(states_and_actions)
+        out = self.net.forward(states_and_actions)
         return out.sample().kapply(self.label2raw)
 
     def __complete_transition(self, transition: Batch):
@@ -50,8 +42,8 @@ class SimulatedEnvParallel(RLBase):
                 code[i] |= Tag.TERMINATED.mask
                 self.__i_step[i] = 0
 
-        if self.max_trlen is not None:
-            truncated: np.ndarray = (self.__i_step >= self.max_trlen)
+        if self.k is not None:
+            truncated: np.ndarray = (self.__i_step >= self.k)
             code[truncated] |= Tag.TRUNCATED.mask
             self.__i_step[truncated] = 0
 
@@ -60,16 +52,16 @@ class SimulatedEnvParallel(RLBase):
     def reset(self, arg: Union[Batch, int]):
         if isinstance(arg, int):
             n = arg
-            batch = self.init_buffer.sample_batch(n)
+            batch = self.env_buffer.sample_batch(n)
         else:
             batch = arg
             n = batch.n
-                
+
         n = batch.n
         self.__current_state = batch.select(self.env.names_s)
         self.__i_step = np.zeros(n, dtype=int)
         self.__initiated = np.ones(n, dtype=bool)
-    
+
     @property
     def current_state(self):
         return self.__current_state
@@ -85,26 +77,24 @@ class SimulatedEnvParallel(RLBase):
         # reset
         done = tran.done
         n_done = int(torch.count_nonzero(done))
-        reset = self.init_buffer.sample_batch(n_done)
+        reset = self.env_buffer.sample_batch(n_done)
         for k in self.__current_state.keys():
             self.__current_state[k] = torch.clone(self.__current_state[k])
             self.__current_state[k][done] = reset[k]
+        
         self.__initiated = self.T.t2a(done, dtype=bool)
-
         return tran
 
 
 class SimulatedEnv(Env):
-    def __init__(self, net: EnvModelNet, init_state: NamedValues,
-                 mode=False):
+    def __init__(self, net: EnvModelNet, mode=False):
         super().__init__(net.env._def)
         self.mode = mode
         self.__true_env = net.env
         self.__net = net
-        self.init_state = init_state.copy()
 
-    def init_episode(self) -> NamedValues:
-        return self.init_state
+    def init_episode(self, init_state: NamedValues) -> NamedValues:
+        return init_state
     
     def transit(self, actions: NamedValues):
         sa = utils.Collections.merge_dic(self.current_state, actions)
