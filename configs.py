@@ -71,8 +71,8 @@ def make_config(env_name: str, model_based: bool,
         config.rl.max_episode_length = 128
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.mbrl.n_batch_fit =  512
-        config.mbrl.n_batch_fit_new_graph = 2048
+        config.mbrl.n_batch_fit = 400
+        config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_rollout = 2048
@@ -87,8 +87,8 @@ def make_config(env_name: str, model_based: bool,
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.mbrl.n_batch_fit =  512
-        config.mbrl.n_batch_fit_new_graph = 2048
+        config.mbrl.n_batch_fit =  400
+        config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 1024
         config.mbrl.n_sample_exploit = 1024
         config.mbrl.n_sample_rollout = 4096
