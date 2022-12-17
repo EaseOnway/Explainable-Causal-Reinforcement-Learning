@@ -18,11 +18,9 @@ NEXT = {name: Env.name_next(name)
 
 
 class Cartpole(Env):
-    def __init__(self, render=False):
-        if render:
-            self.__core = cartpole.CartPoleEnv(render_mode='human')
-        else:
-            self.__core = cartpole.CartPoleEnv()
+
+    def define(self, args):
+        self.__render: bool = args.render
         
         _def = Env.Definition()
         _def.state(POSITION, ContinuousNormal(scale=None))
@@ -30,12 +28,22 @@ class Cartpole(Env):
         _def.state(ANGLE, ContinuousNormal(scale=None))
         _def.state(ANGLE_VLOCITY, ContinuousNormal(scale=None))
         _def.action(PUSH, NamedCategorical('left', 'right'))
-
-        super().__init__(_def)
-
-        self.def_reward('failure', [POSITION, ANGLE],
-                        lambda x, a: -10 * float(self.__fail(x, a)))
+        _def.reward('failure', [POSITION, ANGLE],
+                    lambda x, a: -10 * float(self.__fail(x, a)))
     
+        return _def
+
+    @classmethod
+    def init_parser(cls, parser):
+        parser.add_argument("--render", action="store_true", default=False,
+                            help="render the envrionment in pygame window.")
+    
+    def launch(self):
+        if self.__render:
+            self.__core = cartpole.CartPoleEnv(render_mode='human')
+        else:
+            self.__core = cartpole.CartPoleEnv()
+
     def __state_variables(self, obs):
         x, vx, a, va = obs
         return {POSITION: x, VELOCITY: vx, ANGLE: a, ANGLE_VLOCITY: va}

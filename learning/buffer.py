@@ -27,7 +27,7 @@ class Buffer(RLBase):
         self.__arrays = _ArrayGetter(self)
         self.__transitions = _TransitionGetter(self)
 
-        for name, vtype in self.env._def.vtypes.items():
+        for name, vtype in self.env.definition.vtypes.items():
             self.__declear(name, vtype.shape, vtype.dtype.torch)
 
     @property

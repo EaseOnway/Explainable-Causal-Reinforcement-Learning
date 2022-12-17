@@ -6,10 +6,8 @@ import torch.distributions as D
 import abc
 
 from .config import *
-from core import Batch, Distributions, Transitions
+from core import Batch, Env
 from core import VType, DType
-
-from envs import make_env
 
 import utils as u
 from utils.typings import *
@@ -40,9 +38,9 @@ class Functional:
 
 
 class Context:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, env: Env):
         self.config = config
-        self.env = make_env(config.env_id)
+        self.env = env
         self.device = torch.device(config.device_id)
         self.torchargs = {'device': self.device,
                           'dtype': DType.Real.torch}
@@ -148,8 +146,8 @@ class BaseNN(nn.Module, RLBase):
             else:
                 nn.init.orthogonal_(p)
     
-    def save(self, path: str):
+    def save(self, path):
         torch.save(self.state_dict(), path)
     
-    def load(self, path: str):
+    def load(self, path):
         self.load_state_dict(torch.load(path))

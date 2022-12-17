@@ -11,8 +11,8 @@ from tensorboard.backend.event_processing import event_accumulator
 from core import Batch, Transitions, Tag
 from .buffer import Buffer
 from .causal_discovery import discover
-from .env_model import SimulatedEnvParallel, CausalNet, MLPNet,\
-    ModelEnsemble, EnvModelNet
+from .env_model import RolloutGenerator, CausalEnvModel, MLPEnvModel,\
+    EnvModelEnsemble, EnvModel
 from .config import Config
 from .base import RLBase, Context
 from .planning import PPO, Actor
@@ -32,7 +32,7 @@ _CONFIG_JSON = 'config.json'
 _RETURN = 'return'
 
 
-class Train(RLBase):
+class Algorithm(RLBase):
 
     @staticmethod
     def set_seed(seed: int):
@@ -41,9 +41,8 @@ class Train(RLBase):
         np.random.seed(seed)
         random.seed(seed)
 
-    def __init__(self, config: Config, name: str,
+    def __init__(self, context: Context, name: str,
                  showinfo: Literal[None, 'brief', 'verbose', 'plot'] = 'verbose'):
-        context = Context(config)
         super().__init__(context)
 
         print("Using following configuration:")
@@ -60,13 +59,13 @@ class Train(RLBase):
         # causal graph, env model, and model optimizer
 
 
-        def get_env_net() -> EnvModelNet:
+        def get_env_net() -> EnvModel:
             if self.config.ablations.mlp:
-                return MLPNet(context)
+                return MLPEnvModel(context)
             else:
-                return CausalNet(context)
+                return CausalEnvModel(context)
         _nets = (get_env_net() for _ in range(self.config.mbrl.ensemble_size))
-        self.models = ModelEnsemble(context, tuple(_nets))
+        self.models = EnvModelEnsemble(context, tuple(_nets))
 
         # planning algorithm
         self.ppo = PPO(context)
@@ -163,7 +162,7 @@ class Train(RLBase):
         log = Log()
 
         batchsize = self.config.mbrl.dream_batch_size
-        env_m = SimulatedEnvParallel(self.models, self.buffer_m, len_rollout)
+        env_m = RolloutGenerator(self.models, self.buffer_m, len_rollout)
         env_m.reset(batchsize)
         
         tr: List[Transitions] = []

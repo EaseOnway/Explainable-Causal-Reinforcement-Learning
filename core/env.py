@@ -2,6 +2,7 @@ from typing import Any, Dict, Sequence, Optional, Set, Tuple, final, Callable, L
 import abc
 import core.vtype as vtype
 from utils.typings import NamedValues, SortedNames
+from argparse import ArgumentParser
 
 
 class Env(abc.ABC):
@@ -27,6 +28,7 @@ class Env(abc.ABC):
             self.state_names: Set[str] = set()
             self.outcome_names: Set[str] = set()
             self.vtypes: Dict[str, vtype.VType] = {}
+            self.rewarders: Dict[str, Env._Rewarder] = {}
 
         def _var(self, name: str, vtype: vtype.VType):
             if name in self.vtypes:
@@ -46,6 +48,10 @@ class Env(abc.ABC):
         def outcome(self, name: str, vtype: vtype.VType):
             self._var(name, vtype)
             self.outcome_names.add(name)
+        
+        def reward(self, label: str, source: Sequence[str],
+                   func: Callable[..., float]):
+            self.rewarders[label] = Env._Rewarder(source, func)
 
     class Transition:
         def __init__(self, variables: NamedValues,
@@ -63,8 +69,11 @@ class Env(abc.ABC):
     def __str__(self):
         return type(self).__name__
 
-    def __init__(self, _def: Definition):
-        self._def = _def
+    @final
+    def __init__(self, args):
+
+        _def = self.define(args)
+        self.__def = _def
         self.__names_a: SortedNames = tuple(sorted(_def.action_names))
         self.__names_s: SortedNames = tuple(sorted(_def.state_names))
         self.__names_next_s: SortedNames = tuple(self.name_next(name) for name in self.__names_s)
@@ -77,21 +86,32 @@ class Env(abc.ABC):
         self.__num_s = len(self.__names_s)
         self.__num_o = len(self.__names_o)
         self.__vtypes: Dict[str, vtype.VType] = _def.vtypes
-
         self.__current_state: NamedValues
         self.__t: int
 
-        self.rewarders: Dict[str, Env._Rewarder] = {}
+    @property
+    @final
+    def definition(self):
+        return self.__def
+    
+    @property
+    def rewarders(self):
+        return self.__def.rewarders
 
-    @final
-    def def_reward(self, label: str, source: Sequence[str],
-                      func: Callable[..., float]):
-        self.rewarders[label] = Env._Rewarder(source, func)
+    @classmethod
+    @abc.abstractmethod
+    def init_parser(cls, parser: ArgumentParser):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def define(self, args) -> Definition:
+        raise NotImplementedError
     
-    @final
-    def undef_reward(self, label: str):
-        del self.rewarders[label]
-    
+    @abc.abstractmethod
+    def launch(self):
+        '''set up core environment of gym, pysc2, etc'''
+        raise NotImplementedError
+
     def reset(self, *args, **kargs):
         ''' initialiize the current state
         '''
@@ -253,5 +273,5 @@ class Env(abc.ABC):
                 for k, v in variables.items()}
 
     def get_full_graph(self):
-        return {name_out: set(self.names_inputs)
+        return {name_out: self.names_inputs
                 for name_out in self.names_outputs}

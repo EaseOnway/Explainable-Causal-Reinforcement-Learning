@@ -1,25 +1,38 @@
-from typing import Literal, Optional
+from typing import Dict, Callable, Type
+from envs.lunar_lander import LunarLander
+from envs.sc2_biuld_marines import SC2BuildMarine
+from envs.sc2_collect import SC2Collect
+from envs.taxi import Taxi
+from envs.cartpole import Cartpole
+from core import Env
 from learning.config import Config
-from torch import device
-import envs
 
 
-N_WARM_UP = {
-    'cartpole':  2048,
-    'buildmarine': 512,
-    'collect': 512,
-    'lunarlander': 4096,
+ALL_ENVS: Dict[str, Type[Env]] = {
+    'lunarlander': LunarLander,
+    'collect': SC2Collect,
+    'taxi': Taxi,
+    'cartpole': Cartpole,
+    'buildmarine': SC2BuildMarine
 }
 
 
-def make_config(env_name: str, model_based: bool,
-                ablation: Optional[str] = None):
+def get_env_class(env_id: str):
+    try:
+        return ALL_ENVS[env_id]
+    except KeyError as e:
+        print(f"unsupported environment id '{env_id}'")
+        print("supported environments are: ", sep='')
+        print(', '.join(ALL_ENVS.keys()))
+        raise e
+
+
+def get_default_config(env_name: str):
     
     config = Config()
     config.device_id = 'cuda'
-    config.env_id = env_name
-    config.rl.n_epoch_actor = 2 if model_based else 8
-    config.rl.n_epoch_critic = 16 if model_based else 64
+    config.rl.n_epoch_actor = 2
+    config.rl.n_epoch_critic = 16
     config.rl.optim.lr = 1e-4
     config.model.pthres_independent = 0.15
     config.rl.optim.batchsize = 512
@@ -28,7 +41,7 @@ def make_config(env_name: str, model_based: bool,
     config.mbrl.explore_rate_max = 0.5
     config.mbrl.n_round_planning = 20
     config.mbrl.interval_graph_update = 3
-    config.mbrl.ensemble_size = 5 if model_based else 1
+    config.mbrl.ensemble_size = 5
 
     if env_name == 'cartpole':
         config.rl.n_sample = 1024
@@ -41,8 +54,9 @@ def make_config(env_name: str, model_based: bool,
         config.model.optim.batchsize = 1024
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
-        config.mbrl.n_sample_explore = 512
-        config.mbrl.n_sample_exploit = 512
+        config.mbrl.n_sample_explore = 256
+        config.mbrl.n_sample_exploit = 256
+        config.mbrl.n_sample_warmup = 1024
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 20)
         config.model.n_jobs_fcit = 16
@@ -59,6 +73,7 @@ def make_config(env_name: str, model_based: bool,
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
         config.mbrl.n_sample_exploit = 64
+        config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
         config.mbrl.rollout_length = (1, 5)
         config.model.n_jobs_fcit = 16
@@ -75,6 +90,7 @@ def make_config(env_name: str, model_based: bool,
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
         config.mbrl.n_sample_exploit = 64
+        config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
         config.mbrl.rollout_length = (1, 5)
         config.model.n_jobs_fcit = 16
@@ -91,23 +107,9 @@ def make_config(env_name: str, model_based: bool,
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 1024
         config.mbrl.n_sample_exploit = 1024
+        config.mbrl.n_sample_warmup = 4096
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 20)
         config.model.n_jobs_fcit = 16
-    else:
-        raise ValueError(f"unknown environment: {env_name}")
-
-    if ablation == 'no_attn':
-        config.ablations.no_attn = True
-    elif ablation == 'recur':
-        config.ablations.recur = True
-    elif ablation == 'offline':
-        config.ablations.offline = True
-    elif ablation == 'dense':
-        config.ablations.dense = True
-    elif ablation == 'mlp':
-        config.ablations.mlp = True
-    elif ablation is not None:
-        raise NotImplementedError("Ablation not supported")
 
     return config

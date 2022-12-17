@@ -17,11 +17,14 @@ NEXT = {name: Env.name_next(name)
 
 
 class Taxi(Env):
-    def __init__(self, render=False):
-        if render:
-            self.__core = taxi.TaxiEnv(render_mode='human')
-        else:
-            self.__core = taxi.TaxiEnv()
+
+    @classmethod
+    def init_parser(cls, parser):
+        parser.add_argument("--render", action="store_true", default=False,
+                            help="render the envrionment in pygame window.")
+
+    def define(self, args):
+        self.__render: bool = args.render
         
         _def = Env.Definition()
         _def.state(X, Categorical(5))
@@ -31,23 +34,27 @@ class Taxi(Env):
         _def.action(ACTION, NamedCategorical('south', 'north', 'east', 'west', 'pike_up', 'drop'))
         _def.outcome(ILLEGAL_OPERATION, Boolean(scale=None))
 
-        super().__init__(_def)
-
         def _r_passenger_picked_up(p, p_):
             if p != 4 and p_ == 4:
                 return 10
             else:
                 return 0
 
-        self.def_reward('passenger_picked_up', (PASSENGER_LOCATION, NEXT[PASSENGER_LOCATION]),
+        _def.reward('passenger_picked_up', (PASSENGER_LOCATION, NEXT[PASSENGER_LOCATION]),
             _r_passenger_picked_up)
-        
-        self.def_reward('passenger_delivered', (PASSENGER_LOCATION, DESTINATION),
+        _def.reward('passenger_delivered', (PASSENGER_LOCATION, DESTINATION),
             lambda p, d: 10 if p==d else 0)
-        
-        self.def_reward('invalid_operation', (ILLEGAL_OPERATION,),
+        _def.reward('invalid_operation', (ILLEGAL_OPERATION,),
             lambda x: -10 if x else 0)
-    
+        
+        return _def
+
+    def launch(self):
+        if self.__render:
+            self.__core = taxi.TaxiEnv(render_mode='human')
+        else:
+            self.__core = taxi.TaxiEnv()
+
     def __state_variables(self, obs):
         y, x, p, d = tuple(self.__core.decode(obs))
         return {Y: y, X: x, PASSENGER_LOCATION: p, DESTINATION: d}

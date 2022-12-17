@@ -2,43 +2,39 @@ from typing import Optional, List, Set, Union, Tuple
 
 import numpy as np
 
-from ..train import Train
 from utils.typings import NamedValues
 from ..base import RLBase
 
 from core import Env, Transitions
 
-from learning.env_model import ModelEnsemble, CausalNet
-
+from learning.env_model import EnvModelEnsemble, CausalEnvModel, EnvModel
+from learning.planning import PPO, Actor
 
 from .explanan import CausalChain
 
 class Explainner(RLBase):
 
-    def __init__(self, trainer: Train):
-        super().__init__(trainer.context)
+    def __init__(self, actor: Actor, env_model: EnvModel):
+        super().__init__(env_model.context)
 
-        self.trainer = trainer
-
-        net = trainer.models
-        if isinstance(net, CausalNet):
-            self.causnet = net
-        elif isinstance(net, ModelEnsemble):
-            net, _ = net.random_select()
-            if not isinstance(net, CausalNet):
+        if isinstance(env_model, CausalEnvModel):
+            self.env_model = env_model
+        elif isinstance(env_model, EnvModelEnsemble):
+            net, _ = env_model.random_select()
+            if not isinstance(net, CausalEnvModel):
                 raise TypeError
-            self.causnet = net
+            self.env_model = net
         else:
             raise TypeError
-        
-        self.actor = trainer.ppo.actor
+
+        self.actor = actor
  
     def build_chain(self, 
             startup: Union[Transitions, NamedValues, Tuple[NamedValues, NamedValues]],
             maxlen: int, from_: Optional[Set[str]] = None, to: Optional[Set[str]] = None,
             thres=0.1, mode=False):
 
-        ch = CausalChain(self.causnet, thres, from_, to, mode)
+        ch = CausalChain(self.env_model, thres, from_, to, mode)
         if isinstance(startup, dict):
             ch.start(startup, self.actor)
         elif isinstance(startup, tuple):

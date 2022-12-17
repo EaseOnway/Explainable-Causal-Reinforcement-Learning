@@ -3,12 +3,13 @@ from typing import Optional, Sequence, List
 import numpy as np
 import torch
 
-from learning.train import Train
 from learning.buffer import Buffer
 from core.data import Transitions, Batch
 from utils.typings import NamedValues
 from utils import Log
 from learning.base import RLBase
+
+from learning.planning import Actor
 
 from .actor import SaliencyActor
 from .q_net import QNet
@@ -16,11 +17,10 @@ from .q_net import QNet
 
 class BaselineExplainner(RLBase):
 
-    def __init__(self, trainer: Train):
-        super().__init__(trainer.context)
+    def __init__(self, actor: Actor):
+        super().__init__(actor.context)
 
-        self.trainer = trainer
-        self.expert_actor = trainer.ppo.actor
+        self.expert_actor = actor
         self.masked_actor = SaliencyActor(self.context)
         self.qnet = QNet(self.context)
 
@@ -29,6 +29,9 @@ class BaselineExplainner(RLBase):
             self.args.optim, self.masked_actor)
         self.opt_q = self.F.get_optmizer(
             self.args.optim, self.qnet)
+
+        self.masked_actor.init_parameters()
+        self.qnet.init_parameters()
 
     def __batch_q(self, batch: Transitions):
         q = self.qnet(batch)
@@ -48,67 +51,56 @@ class BaselineExplainner(RLBase):
 
     def __batch_saliency(self, batch: Transitions):
         state = batch.select(self.env.names_s)
-        expert_actions = batch.select(self.env.names_a)
+
+        with torch.no_grad():
+            expert_pi = self.expert_actor.forward(state)
+
         masked_pi = self.masked_actor.forward(state)
         mask = self.masked_actor.mask
-        log_prob = masked_pi.logprob(expert_actions)
 
-        nll_loss = -torch.mean(log_prob)
+        kl = torch.mean(expert_pi.kl(masked_pi))
+
         sparity_loss = torch.mean(torch.sum(torch.abs(mask), dim=1)) / self.env.num_s
-        loss = nll_loss + self.args.sparse_factor * sparity_loss
+        loss = kl + self.args.sparse_factor * sparity_loss
 
         loss.backward()
         self.F.optim_step(self.args.optim, self.masked_actor, self.opt_saliency)
         
-        return float(nll_loss), float(sparity_loss)
+        return float(kl), float(sparity_loss)
     
-    def train_saliency(self, n_sample: int, n_batch: int):
+    def train_saliency(self, buffer: Buffer, n_batch: int):
         log = Log()
-        buffer = Buffer(self.context, n_sample)
-
-        print("collecting sample")
-        self.trainer.collect(buffer, n_sample, 0., False)
 
         for i in range(n_batch):
             batch = buffer.sample_batch(self.args.optim.batchsize)
-            nll_loss, sparity_loss = self.__batch_saliency(batch)
-            log['nll_loss'] = nll_loss
+            kl, sparity_loss = self.__batch_saliency(batch)
+            log['kl'] = kl
             log['sparity_loss'] = sparity_loss
         
-            if self.trainer.show_detail:
-                interval = n_batch // 10
-                if interval == 0 or (i + 1) % interval == 0:
-                    print(f"  batch {i + 1}/{n_batch}:\n"
-                          f"    nll_loss = {nll_loss}\n"
-                          f"    sparity_loss = {sparity_loss}\n")
+            interval = n_batch // 10
+            if interval == 0 or (i + 1) % interval == 0:
+                print(f"  batch {i + 1}/{n_batch}:\n"
+                        f"    kl_divergence = {kl}\n"
+                        f"    sparity_loss = {sparity_loss}\n")
 
-        print(f"completed:\n"
-              f"    nll_loss = {log['nll_loss'].mean}\n"
-              f"    sparity_loss = {log['sparity_loss'].mean}")
-        
         return log
 
-    def train_q(self, n_sample: int, n_batch: int):
+    def train_q(self, buffer: Buffer, n_batch: int):
         log = Log()
-        buffer = Buffer(self.context, n_sample)
-
-        print("collecting sample")
-        self.trainer.collect(buffer, n_sample, None, False)
 
         for i in range(n_batch):
             batch = buffer.sample_batch(self.args.optim.batchsize)
             td_error = self.__batch_q(batch)
             log['td_error'] = td_error
         
-            if self.trainer.show_detail:
-                interval = n_batch // 10
-                if interval == 0 or (i + 1) % interval == 0:
-                    print(f"  batch {i + 1}/{n_batch}:\n"
-                          f"    td_error = {td_error}")
+            interval = n_batch // 10
+            if interval == 0 or (i + 1) % interval == 0:
+                print(f"  batch {i + 1}/{n_batch}:\n"
+                        f"    td_error = {td_error}")
 
         print(f"completed:\n"
               f"    td_error = {log['td_error'].mean}")
-        
+
         return log
 
     def state_dict(self):
@@ -119,13 +111,11 @@ class BaselineExplainner(RLBase):
         self.masked_actor.load_state_dict(dic['saliency'])
         self.qnet.load_state_dict(dic['q'])
     
-    def save(self, path: Optional[str] = None):
-        path = path or self.trainer.run_dir + 'saved-baselines'
+    def save(self, path):
         torch.save(self.state_dict(), path)
         print(f"succesfully saved [baselines] to {path}")
     
-    def load(self, path: Optional[str] = None):
-        path = path or self.trainer.run_dir + 'saved-baselines'
+    def load(self, path):
         self.load_state_dict(torch.load(path))
         print(f"succesfully load [baselines] from {path}")
                 

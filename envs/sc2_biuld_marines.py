@@ -435,7 +435,11 @@ def build_task(build_cls: int):
         return TaskQueue(Build(utype), BackToWork(), Sleep(30), WaitForComplete(utype))
 
 class SC2BuildMarine(Env):
-    def __init__(self):
+    @classmethod
+    def init_parser(cls, parser):
+        pass
+    
+    def define(self, args):
         _def = Env.Definition()
         _def.state(N_WORKER, IntegarNormal(scale=None))
         _def.state(N_MARINE, IntegarNormal(scale=None))
@@ -446,16 +450,12 @@ class SC2BuildMarine(Env):
         _def.action(BUILD, NamedCategorical(
             "none", "worker", "marine", "barracks", "supply depot"))
         
-        # _def.action(BUILD_WORKER, Binary())
-        # _def.action(BUILD_MARINE, Binary())
-        # _def.action(BUILD_DEPOT, Binary())
-        # _def.action(BUILD_BARRACKS, Binary())
+        _def.reward("new marines", [N_MARINE, NEXT[N_MARINE]],
+                    lambda n, n_: n_ - n)
 
-        super().__init__(_def)
+        return _def
 
-        self.def_reward("new marines", [N_MARINE, NEXT[N_MARINE]],
-                        lambda n, n_: n_ - n)
-
+    def launch(self):
         self._pysc2env = self.__make_env()
         self.__need_restart = False
 
@@ -532,14 +532,6 @@ class SC2BuildMarine(Env):
     
     def terminated(self, variables: NamedValues) -> bool:
         return variables[NEXT[TIMESTEP]] >= 1600
-
-    '''
-    def random_action(self) -> NamedValues:
-        return {BUILD_WORKER: np.random.rand() < 0.25,
-                BUILD_MARINE: np.random.rand() < 0.25,
-                BUILD_DEPOT: np.random.rand() < 0.25,
-                BUILD_BARRACKS: np.random.rand() < 0.25}
-    '''
 
     def random_action(self) -> NamedValues:
         return {BUILD: random.randint(0, 4)}

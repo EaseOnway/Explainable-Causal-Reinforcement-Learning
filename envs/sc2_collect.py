@@ -397,7 +397,11 @@ class MainTask(ActionQueue):
 
 
 class SC2Collect(Env):
-    def __init__(self):
+    @classmethod
+    def init_parser(cls, parser):
+        pass
+
+    def define(self, args):
         _def = Env.Definition()
         _def.state(N_WORKER, IntegarNormal(scale=None))
         _def.state(DEPOTS, IntegarNormal(8, scale=None))
@@ -409,14 +413,14 @@ class SC2Collect(Env):
         _def.action(TRAIN_WORKER, Categorical(3))
         _def.outcome(ILLEGAL_ACTION, Boolean(scale=None))
         _def.outcome(COLLECTED_RESOURCE, IntegarNormal(scale=None))
-
-        super().__init__(_def)
-
-        self.def_reward("illegal action", [ILLEGAL_ACTION],
+        _def.reward("illegal action", [ILLEGAL_ACTION],
                         lambda x: -10 * float(x))
-        self.def_reward("collected resource", [COLLECTED_RESOURCE],
-                        lambda x: 0.1 * x)
+        _def.reward("collected resource", [COLLECTED_RESOURCE],
+                    lambda x: 0.1 * x)
 
+        return _def
+    
+    def launch(self):
         self._pysc2env = self.__make_env()
         self.__need_restart = False
 

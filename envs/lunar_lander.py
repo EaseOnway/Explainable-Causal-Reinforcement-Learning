@@ -29,14 +29,22 @@ NEXT = {name: Env.name_next(name) for name in
 class LunarLander(Env):
     DISCRETE_FUEL_COSTS = np.array([0., 0.03, 0.3, 0.03])
 
-    def __init__(self, continuous=False, render=False):
-        if render:
-            self.__core = lunar_lander.LunarLander(render_mode='human',
-                                                   continuous=continuous)
+    def __str__(self):
+        if self.__continuous:
+            return "LunarLanderContinuous"
         else:
-            self.__core = lunar_lander.LunarLander(continuous=continuous)
-        
-        self.__continuous = continuous
+            return "LunarLander"
+    
+    @classmethod
+    def init_parser(cls, parser):
+        parser.add_argument("--render", action="store_true", default=False,
+                            help="render the envrionment in pygame window.")
+        parser.add_argument("--continuous", action="store_true", default=False,
+                            help="use continuous action space")
+
+    def define(self, args):
+        self.__continuous: bool = args.continuous
+        self.__render: bool = args.render
 
         _def = Env.Definition()
         _def.state(X, ContinuousNormal(scale=None))
@@ -56,24 +64,27 @@ class LunarLander(Env):
         _def.outcome(CRASH, Boolean(scale=None))
         _def.outcome(REST, Boolean(scale=None))
         _def.outcome(FUEL_COST, ContinuousNormal(scale=None))
-
-        super().__init__(_def)
-
-        self.def_reward("getting close", (X, Y, NEXT[X], NEXT[Y]),
+        _def.reward("getting close", (X, Y, NEXT[X], NEXT[Y]),
             lambda x, y, x_, y_: 100 * (np.sqrt(x*x + y*y) - np.sqrt(x_*x_ + y_*y_)))
-        self.def_reward("slowing down", (VX, VY, NEXT[VX], NEXT[VY]),
+        _def.reward("slowing down", (VX, VY, NEXT[VX], NEXT[VY]),
             lambda x, y, x_, y_: 100 * (np.sqrt(x*x + y*y) - np.sqrt(x_*x_ + y_*y_)))
-        self.def_reward("balancing", (ANG, NEXT[ANG]),
+        _def.reward("balancing", (ANG, NEXT[ANG]),
             lambda ang, ang_: 100 * (np.abs(ang) - np.abs(ang_)))
-        self.def_reward("landed legs", (LEGS, NEXT[LEGS]),
+        _def.reward("landed legs", (LEGS, NEXT[LEGS]),
             lambda leg, leg_: 10 * (float(leg_[0]) + float(leg_[1]) - 
                                     float(leg[0]) - float(leg[1])))
-        self.def_reward("fuel cost", (FUEL_COST,), lambda x: -x)
-        self.def_reward("resting", (REST,), lambda x: 100 if x else 0)
-        self.def_reward("crash", (CRASH,), lambda x: -100 if x else 0)
+        _def.reward("fuel cost", (FUEL_COST,), lambda x: -x)
+        _def.reward("resting", (REST,), lambda x: 100 if x else 0)
+        _def.reward("crash", (CRASH,), lambda x: -100 if x else 0)
 
-    def __del__(self):
-        self.__core.close()
+        return _def
+    
+    def launch(self):
+        if self.__render:
+            self.__core = lunar_lander.LunarLander(render_mode='human',
+                                                   continuous=self.__continuous)
+        else:
+            self.__core = lunar_lander.LunarLander(continuous=self.__continuous)
     
     def __state_variables(self, x):
         return {X: x[0], Y: x[1], VX: x[2], VY: x[3],

@@ -3,9 +3,8 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set, L
 import numpy as np
 import torch
 
-from ..env_model import SimulatedEnv, ModelEnsemble, CausalNet
+from ..env_model import CausalEnvModel
 from ..planning import Actor
-from ..train import Train
 from utils.typings import NamedValues, SortedNames
 from core import Env
 
@@ -57,7 +56,7 @@ class CausalNode:
 
 
 class CausalChain:
-    def __init__(self, net: CausalNet, thres: float,
+    def __init__(self, net: CausalEnvModel, thres: float,
                  from_: Optional[Set[str]] = None,
                  to: Optional[Set[str]] = None,
                  mode=True):
@@ -386,7 +385,7 @@ class CausalChain:
     def plot(self, only_chain=True):
         from graphviz import Digraph
 
-        g = Digraph("causal chain")
+        g = Digraph("causal chain", format='png')
 
         def node_id(node: CausalNode):
             if node.is_reward:

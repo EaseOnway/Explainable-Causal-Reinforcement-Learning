@@ -29,7 +29,14 @@ class RewardScaling:
     def std(self):
         return float(np.sqrt(self.__s / self.n))
     
-    def __call__(self, reward: float, done: bool):
+    def apply(self, reward):
+        std = self.std
+        if self.n <= 1 or std == 0.:
+            return reward
+        else:
+            return reward / std
+    
+    def __call__(self, reward: float, done: bool) -> float:
         r = self.__sum_reward * self.discount + reward
         self.n += 1
 
@@ -41,14 +48,9 @@ class RewardScaling:
             self.mean += (r - old_mean) / self.n
             self.__s += (r - old_mean) * (r - self.mean)
         
-        
         if done:
             self.__sum_reward = 0.
         else:
             self.__sum_reward = r
         
-        std = self.std
-        if self.n <= 1 or std == 0.:
-            return reward
-        else:
-            return reward / std
+        return self.apply(reward)

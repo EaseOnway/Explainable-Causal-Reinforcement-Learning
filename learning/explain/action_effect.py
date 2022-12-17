@@ -4,8 +4,7 @@ import numpy as np
 import torch
 
 from ..env_model.inferrer import Inferrer
-from ..env_model import CausalNet, SimulatedEnv
-from ..train import Train
+from ..env_model import CausalEnvModel
 from core import Batch
 from utils.visualize import plot_digraph
 from utils.typings import NamedTensors, NamedValues, Edge, SortedNames
@@ -16,7 +15,7 @@ import core.scm as scm
 
 
 class ActionEffect(RLBase):
-    def __init__(self, network: CausalNet, action: NamedValues,
+    def __init__(self, network: CausalEnvModel, action: NamedValues,
                  interest: Optional[Set[str]] = None):
 
         super().__init__(network.context)

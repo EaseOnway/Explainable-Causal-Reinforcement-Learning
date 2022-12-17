@@ -27,8 +27,7 @@ def _test(edge: Tuple[str, str], data: NamedArrays, input_names: SortedNames):
 
 def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True,
              n_jobs=1) -> ParentDict:
-    pa_dic: ParentDict = {
-        key: set() for key in env.names_outputs}
+    pa_dic = {key: set() for key in env.names_outputs}
     
     print('starting causal discovery')
     edges = [(i, j) for j in env.names_outputs for i in env.names_inputs]
@@ -51,4 +50,5 @@ def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True,
             print(f"({', '.join(parents)}) --> {name}")
         print('---------------------------------------------------------------')
     
-    return pa_dic
+    return {k: tuple(sorted(pa)) for k, pa in pa_dic.items()}
+  

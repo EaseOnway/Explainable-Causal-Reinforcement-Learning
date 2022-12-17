@@ -51,15 +51,11 @@ class _BaseConfig:
             else:
                 setattr(self, k, v)
     
-    def save(self, path: str):
-        if path[-5:] != '.json':
-            path = path + '.json'
+    def save(self, path):
         with open(path, 'w') as f:
             json.dump(self.to_dict(), f, indent=4)
 
-    def load(self, path: str):
-        if path[-5:] != '.json':
-            path = path + '.json'
+    def load(self, path):
         with open(path, 'r') as f:
             self.load_dict(json.load(f))
 
@@ -126,6 +122,7 @@ class MBRLArgs(_BaseConfig):
         self.n_sample_rollout = 100
         self.n_sample_explore = 100
         self.n_sample_exploit = 100
+        self.n_sample_warmup = 400
         self.dream_batch_size = 64
         self.explore_rate_max = 0.5  # exploration rate for estimating model
         self.interval_graph_update = 5
@@ -149,5 +146,4 @@ class Config(_BaseConfig):
         self.rl = RLArgs()
         self.mbrl = MBRLArgs() 
         self.device_id: str = 'cpu'
-        self.env_id: str = 'UNDEFINED'
         self.baseline = Baseline()
