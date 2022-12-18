@@ -5,8 +5,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Any
 import torch
 import torch.nn as nn
 
-from learning.env_model.inferrer import DistributionDecoder
-from learning.env_model.encoder import VariableConcat
+from learning.env_model.modules import DistributionDecoder, VariableConcat
 from core.data import Batch
 from utils.typings import NamedValues
 import utils
@@ -17,7 +16,7 @@ class QNet(BaseNN):
     def __init__(self, context: Context):
         super().__init__(context)
 
-        self.varcat = VariableConcat(context, context.env.names_inputs)
+        self.varcat = VariableConcat(context, context.env.names_input)
 
         dim = self.config.baseline.dim_q_hidden
         self.mlp = nn.Sequential(

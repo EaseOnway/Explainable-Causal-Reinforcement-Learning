@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set, L
 import numpy as np
 import torch
 
-from ..env_model import CausalEnvModel
+from ..env_model import AttnCausalModel
 from ..planning import Actor
 from utils.typings import NamedValues, SortedNames
 from core import Env
@@ -56,7 +56,7 @@ class CausalNode:
 
 
 class CausalChain:
-    def __init__(self, net: CausalEnvModel, thres: float,
+    def __init__(self, net: AttnCausalModel, thres: float,
                  from_: Optional[Set[str]] = None,
                  to: Optional[Set[str]] = None,
                  mode=True):
@@ -91,11 +91,11 @@ class CausalChain:
     def __len__(self):
         return len(self._transitions)
     
-    def step(self, transition: Env.Transition):
+    def step(self, transition: Env.Transition, attn: torch.Tensor):
         assert not self.terminated
         if self.t == 0:
-            ae = ActionEffect(self._net, self._env.action_of(transition.variables),
-                              self.__from)
+            ae = ActionEffect(self._env, self._net.causal_graph,
+                              transition, attn, self.__from)
             self._variable_nodes.append({})
             self._reward_nodes.append({})
             for name in self._env.names_s:
@@ -104,15 +104,19 @@ class CausalChain:
                 node.reached = True
                 self.next_vnodes[name] = node
         else:
-            ae = ActionEffect(self._net, self._env.action_of(transition.variables))
+            ae = ActionEffect(self._env, self._net.causal_graph,
+                              transition, attn)
 
         for name_out in self._env.names_o:
             node = CausalNode(name_out, transition.variables[name_out], self.t, False)
             for name_in in ae.who_cause(name_out):
                 if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
                     node.add_parent(self.next_vnodes[name_in])
-            if self.t == 0 and ae[name_out] >= self._thres:
-                node.reached = True
+            if self.t == 0:
+                for a in self.__from:
+                    if ae[a, name_out] >= self._thres: 
+                        node.reached = True
+                        break
             self.next_vnodes[name_out] = node
 
         next_dict: Dict[str, CausalNode] = {}
@@ -122,8 +126,11 @@ class CausalChain:
             for name_in in self._env.names_s:
                 if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
                     node.add_parent(self.next_vnodes[name_in])
-            if self.t == 0 and ae[name_out] >= self._thres:
-                node.reached = True
+            if self.t == 0:
+                for a in self.__from:
+                    if ae[a, name_out] >= self._thres: 
+                        node.reached = True
+                        break
             self.next_vnodes[name_out] = node
             next_dict[name_s] = node
 
@@ -150,17 +157,18 @@ class CausalChain:
         variables.update(outs)
         terminated = self._env.terminated(variables)
         reward = self._env.reward(variables)
-        return Env.Transition(variables, reward, terminated)
+        attn = self._net.weight.squeeze(0)
+        return Env.Transition(variables, reward, terminated), attn
 
     def follow(self, a: Union[NamedValues, Actor]):
         assert self.t > 0
         s = self._env.state_shift(self._transitions[-1].variables)
-        transition = self.__simulate(s, a)
-        self.step(transition)
+        transition, attn = self.__simulate(s, a)
+        self.step(transition, attn)
     
     def start(self, s: NamedValues, a: Union[NamedValues, Actor]):
-        transition = self.__simulate(s, a)
-        self.step(transition)
+        transition, attn = self.__simulate(s, a)
+        self.step(transition, attn)
 
     def __get_intervals(self, t: int, names: SortedNames, complete=True):
             out: List[CausalNode] = []
@@ -190,7 +198,7 @@ class CausalChain:
                 for s in interval_states:
                     lines.append(f"|\t|\t{s.name} = {self.__text(s)}")
 
-        if self.step == 0:
+        if self.t == 0:
             lines.append(f"|\tWe take the given action:")
         else:
             lines.append(f"|\tWe will possibly take an action like:")
@@ -430,7 +438,7 @@ class CausalChain:
             if t == 0:
                 for name in self._env.names_s:
                     set_node(nodes[name])
-            for name in self._env.names_outputs:
+            for name in self._env.names_output:
                 set_node(nodes[name])
 
             for r in self._reward_nodes[t].values():

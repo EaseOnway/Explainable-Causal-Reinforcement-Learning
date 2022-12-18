@@ -4,6 +4,7 @@ from envs.sc2_biuld_marines import SC2BuildMarine
 from envs.sc2_collect import SC2Collect
 from envs.taxi import Taxi
 from envs.cartpole import Cartpole
+from envs.cancer import Cancer
 from core import Env
 from learning.config import Config
 
@@ -13,7 +14,8 @@ ALL_ENVS: Dict[str, Type[Env]] = {
     'collect': SC2Collect,
     'taxi': Taxi,
     'cartpole': Cartpole,
-    'buildmarine': SC2BuildMarine
+    'buildmarine': SC2BuildMarine,
+    'cancer': Cancer,
 }
 
 
@@ -98,7 +100,7 @@ def get_default_config(env_name: str):
         config.rl.n_sample = 2048
         config.rl.discount = 0.98
         config.rl.gae_lambda = 0.975
-        config.rl.kl_penalty = 0.94
+        config.rl.kl_penalty = 0.04
         config.rl.entropy_penalty = 0.04
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
@@ -110,6 +112,23 @@ def get_default_config(env_name: str):
         config.mbrl.n_sample_warmup = 4096
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 20)
+        config.model.n_jobs_fcit = 16
+    elif env_name == 'cancer':
+        config.rl.n_sample = 256
+        config.rl.discount = 0.95
+        config.rl.gae_lambda = 0.9
+        config.rl.kl_penalty = 0.2
+        config.rl.entropy_penalty = 0.05
+        config.rl.max_episode_length = 40
+        config.model.buffer_size = 100000
+        config.model.optim.batchsize = 1024
+        config.mbrl.n_batch_fit =  400
+        config.mbrl.n_batch_fit_new_graph = 800
+        config.mbrl.n_sample_explore = 80
+        config.mbrl.n_sample_exploit = 80
+        config.mbrl.n_sample_warmup = 400
+        config.mbrl.n_sample_rollout = 4096
+        config.mbrl.rollout_length = (1, 8)
         config.model.n_jobs_fcit = 16
 
     return config

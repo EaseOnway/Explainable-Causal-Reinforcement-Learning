@@ -12,8 +12,7 @@ from core import Batch, Transitions, Tag
 from learning.buffer import Buffer
 from learning.causal_discovery import discover
 from learning.planning import PPO, Actor
-from learning.env_model import RolloutGenerator, CausalEnvModel, MLPEnvModel,\
-    EnvModelEnsemble, EnvModel
+import learning.env_model as em
 
 from utils import Log, RewardScaling
 from utils.typings import ParentDict, NamedArrays, ParentDict
@@ -41,7 +40,7 @@ class Train(Experiment):
 
         # probable attributes
         # model
-        self.env_models: EnvModelEnsemble
+        self.env_models: em.EnvModelEnsemble
         self.env_model_optimizers: Tuple[torch.optim.Optimizer, ...]
         # planning algorithm
         self.ppo: PPO
@@ -53,14 +52,17 @@ class Train(Experiment):
         # declear runtime variables
         self.n_sample = 0
     
-    def creat_env_models(self, ensemble_size: int) -> EnvModelEnsemble:
+    def creat_env_models(self, ensemble_size: int) -> em.EnvModelEnsemble:
         if self.config.ablations.mlp:
-            return EnvModelEnsemble(self.context, 
-                tuple(MLPEnvModel(self.context) for _ in range(ensemble_size)))
+            return em.EnvModelEnsemble(self.context, 
+                tuple(em.MLPEnvModel(self.context) for _ in range(ensemble_size)))
+        elif self.config.ablations.recur:
+            return em.EnvModelEnsemble(self.context, 
+                tuple(em.RecurrentCausalModel(self.context) for _ in range(ensemble_size)))
         else:
-            return EnvModelEnsemble(self.context, 
-                tuple(CausalEnvModel(self.context) for _ in range(ensemble_size)))
-    
+            return em.EnvModelEnsemble(self.context, 
+                tuple(em.AttnCausalModel(self.context) for _ in range(ensemble_size)))
+
     def collect(self, buffer: Buffer, n_sample: int, explore_rate: Optional[float],
                 reward_scaling: bool, actor: Optional[Actor] = None):
         '''collect real-world samples into the buffer, and compute returns'''
@@ -129,10 +131,7 @@ class Train(Experiment):
     @final
     def causal_graph(self, graph: ParentDict):
         self.__causal_graph = graph
-        if not self.config.ablations.mlp:
-            assert(isinstance(self.env_models, CausalEnvModel) or
-                   isinstance(self.env_models, EnvModelEnsemble))
-            self.env_models.load_graph(self.__causal_graph)
+        self.env_models.load_graph(self.__causal_graph)
     
     def evaluate_policy(self, n_sample: int):
         '''collect real-world samples into the buffer, and compute returns'''
@@ -164,7 +163,7 @@ class Train(Experiment):
 
     def plot_causal_graph(self, format='png'):
         return utils.visualize.plot_digraph(
-            self.env.names_inputs + self.env.names_outputs,
+            self.env.names_input + self.env.names_output,
             self.__causal_graph, format=format)  # type: ignore
     
     def save(self, o: object, name: str, fmt: Optional[str] = None):
@@ -254,7 +253,7 @@ class Train(Experiment):
         
         # show info
         print(f"nll-loss:\t{eval_log[_NLL_LOSS].mean}")
-        for k in self.env.names_outputs:
+        for k in self.env.names_output:
             print(f"log-likelihood of '{k}':\t{eval_log[_LL, k].mean}")
         
         return train_log, eval_log

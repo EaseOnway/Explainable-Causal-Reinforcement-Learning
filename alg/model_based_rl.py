@@ -42,9 +42,7 @@ class ModelBasedRL(Train):
 
         # setting ablation
         ablation = self.args.ablation
-        if ablation == 'no_attn':
-            config.ablations.no_attn = True
-        elif ablation == 'recur':
+        if ablation == 'recur':
             config.ablations.recur = True
         elif ablation == 'offline':
             config.ablations.offline = True
@@ -181,7 +179,7 @@ class ModelBasedRL(Train):
         writer.add_scalar('fitting_loss', fit_eval[_NLL_LOSS].mean, self.n_sample)
         writer.add_scalars('log_likelihood',
                            {k: fit_eval[_LL, k].mean
-                            for k in self.env.names_outputs},
+                            for k in self.env.names_output},
                            self.n_sample)
 
         # show info

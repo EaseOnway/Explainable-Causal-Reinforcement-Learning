@@ -218,12 +218,12 @@ class Env(abc.ABC):
 
     @property
     @final
-    def names_inputs(self):
+    def names_input(self):
         return self.__names_inputs
 
     @property
     @final
-    def names_outputs(self):
+    def names_output(self):
         return self.__names_outputs
 
     @property    
@@ -249,6 +249,16 @@ class Env(abc.ABC):
     def num_o(self):
         return self.__num_o
     
+    @property
+    @final
+    def num_input(self):
+        return self.__num_a + self.__num_s
+    
+    @property
+    @final
+    def num_output(self):
+        return self.__num_o + self.__num_s
+
     @final
     def var(self, name: str):
         return self.__vtypes[name]
@@ -273,5 +283,5 @@ class Env(abc.ABC):
                 for k, v in variables.items()}
 
     def get_full_graph(self):
-        return {name_out: self.names_inputs
-                for name_out in self.names_outputs}
+        return {name_out: self.names_input
+                for name_out in self.names_output}

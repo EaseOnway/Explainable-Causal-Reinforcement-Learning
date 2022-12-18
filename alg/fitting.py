@@ -93,11 +93,11 @@ class Fitting(Train):
             # write summary
             writer.add_scalar('log-likelihood', -log[_NLL_LOSS].mean, len(self.buffer_m))
             writer.add_scalars('log_likelihood_variable',
-                {k: log[_LL, k].mean for k in self.env.names_outputs}, len(self.buffer_m))
+                {k: log[_LL, k].mean for k in self.env.names_output}, len(self.buffer_m))
 
             # show info
             print(f"- total log-likelihood:\t{-log[_NLL_LOSS].mean}")
-            for k in self.env.names_outputs:
+            for k in self.env.names_output:
                 print(f"- log-likelihood of '{k}':\t{log[_LL, k].mean}")
         
             # save

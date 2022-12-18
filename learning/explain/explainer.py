@@ -7,7 +7,7 @@ from ..base import RLBase
 
 from core import Env, Transitions
 
-from learning.env_model import EnvModelEnsemble, CausalEnvModel, EnvModel
+from learning.env_model import EnvModelEnsemble, AttnCausalModel, EnvModel
 from learning.planning import PPO, Actor
 
 from .explanan import CausalChain
@@ -17,11 +17,11 @@ class Explainner(RLBase):
     def __init__(self, actor: Actor, env_model: EnvModel):
         super().__init__(env_model.context)
 
-        if isinstance(env_model, CausalEnvModel):
+        if isinstance(env_model, AttnCausalModel):
             self.env_model = env_model
         elif isinstance(env_model, EnvModelEnsemble):
             net, _ = env_model.random_select()
-            if not isinstance(net, CausalEnvModel):
+            if not isinstance(net, AttnCausalModel):
                 raise TypeError
             self.env_model = net
         else:
@@ -41,9 +41,11 @@ class Explainner(RLBase):
             s, a = startup
             ch.start(s, a)
         else:
+            _ = self.env_model.forward(startup)
+            attns = self.env_model.weight
             for i in range(min(maxlen, startup.n)):
                 transition = startup.at(i)
-                ch.step(transition)
+                ch.step(transition, attns[i])
 
         while ch.t < (maxlen or 9999):
             ch.follow(self.actor)

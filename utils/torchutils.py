@@ -1,7 +1,8 @@
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Sequence
 import numpy as np
 import torch
 from torch import Tensor
+import torch.nn as nn
 from .basics import Shaping
 from .typings import Shape
 
@@ -126,3 +127,43 @@ class RunningStatistics:
     
     def standardize(self, data: torch.Tensor):
         return self.normalize(self.decentralize(data))
+
+
+class MultiLinear(nn.Module):
+    def __init__(self, size: Sequence[int], dim_in: int, dim_out: int,
+                 dtype: torch.dtype, device: torch.device, bias=True):
+        '''
+        size: a sequence of integars indicate the size of linear transforms.
+            1 for shared transform.
+        '''
+
+        super().__init__()
+        
+        self.size = tuple(size)
+        self.weight = nn.Parameter(torch.empty(
+            *size, dim_in, dim_out,
+            device=device, dtype=dtype))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(
+                *size, dim_out,
+                device=device, dtype=dtype))
+        else:
+            self.bias = None
+    
+    def forward(self, x: torch.Tensor):
+        '''
+        input: [..., *size, dim_in]
+        output: [..., *size, dim_out]
+        '''
+        
+        # x: ..., *size, dim_in
+        x = x.unsqueeze(-2)  # ..., *size, 1, dim_in
+        w = self.weight  # *size, dim_in, dim_out
+        b = self.bias  # *size, dim_out
+
+        y = torch.matmul(x, w)  # ..., *size, 1, dim_out
+        y = y.squeeze(-2)  # ..., *size, dim_out
+        
+        if b is not None:
+            y = y + b
+        return y

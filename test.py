@@ -1,5 +1,5 @@
 from learning.explain import Explainner
-from learning.env_model import CausalEnvModel
+from learning.env_model import AttnCausalModel
 from learning.planning import Actor
 from learning.buffer import Buffer
 from baselines import BaselineExplainner
@@ -23,7 +23,7 @@ class Test(Experiment):
         parser.add_argument('--baseline', type=str, required=True)
     def setup(self):
         super().setup()
-        self.model = CausalEnvModel(self.context)
+        self.model = AttnCausalModel(self.context)
         self.actor = Actor(self.context)
         self.actor.load(self.args.actor)
         self.model.load(self.args.env_model)
@@ -103,9 +103,9 @@ class Test(Experiment):
         self.env.reset()
 
 
-test = Test(['cartpole', '--render',
-             r"--actor=experiments\cartpole\model-free\run-1\actor.nn",
-             r"--env-model=experiments\cartpole\explain\run-2\env-model-0.nn",
-             r"--graph=experiments\cartpole\explain\run-2\causal-graph.json",
-             r"--baseline=experiments\cartpole\explain\run-2\baselines.nn"])
+test = Test(['cancer',
+             r"--actor=experiments\cancer\model-free\run-7\actor.nn",
+             r"--env-model=experiments\cancer\explain\run-2\env-model-0.nn",
+             r"--graph=experiments\cancer\explain\run-2\causal-graph.json",
+             r"--baseline=experiments\cancer\explain\run-2\baselines.nn"])
 test.execute()

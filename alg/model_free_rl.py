@@ -22,6 +22,7 @@ class ModelFreeRL(Train):
         super().init_parser(parser)
         parser.add_argument('--n-step', type=int, default=200)
         parser.add_argument('--store-buffer', action='store_true', default=False)
+    
     def make_title(self):
         return "model-free"
 

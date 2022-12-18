@@ -5,7 +5,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Any
 import torch
 import torch.nn as nn
 
-from learning.env_model.inferrer import DistributionDecoder
+from learning.env_model.modules import DistributionDecoder
 from learning.buffer import Buffer
 from learning.base import BaseNN, Context
 from learning.planning.ppo import PPO, Critic, Actor

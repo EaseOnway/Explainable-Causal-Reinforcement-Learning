@@ -27,13 +27,13 @@ def _test(edge: Tuple[str, str], data: NamedArrays, input_names: SortedNames):
 
 def discover(data: NamedArrays, env: Env, thres=0.05, showinfo=True,
              n_jobs=1) -> ParentDict:
-    pa_dic = {key: set() for key in env.names_outputs}
+    pa_dic = {key: set() for key in env.names_output}
     
     print('starting causal discovery')
-    edges = [(i, j) for j in env.names_outputs for i in env.names_inputs]
+    edges = [(i, j) for j in env.names_output for i in env.names_input]
 
     p_values = joblib.Parallel(n_jobs)(
-        joblib.delayed(_test)(edge, data, env.names_inputs)
+        joblib.delayed(_test)(edge, data, env.names_input)
         for edge in edges)
     assert p_values is not None
 

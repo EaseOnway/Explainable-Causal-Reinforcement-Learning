@@ -22,6 +22,8 @@ class Functional:
         kargs = args.alg_args
         if algorithm == "Adam":
             return torch.optim.Adam(network.parameters(), lr, **kargs)
+        elif algorithm == "AdamW":
+            return torch.optim.AdamW(network.parameters(), lr, **kargs)
         elif algorithm == "SGD":
             return torch.optim.SGD(network.parameters(), lr, **kargs)
         else:

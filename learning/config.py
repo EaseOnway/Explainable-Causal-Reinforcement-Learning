@@ -64,19 +64,17 @@ class NetDims(_BaseConfig):
     def __init__(self):
         self.variable_encoding: int = 64
         self.variable_encoder_hidden: int = 64
-        self.action_influce_embedding: int = 128
-        self.aggregator_hidden: int = 64
+        self.aggregator_hidden: int = 128
         self.inferrer_value: int = 128
-        self.inferrer_key: int = 64
-        self.inferrer_feed_forward: int = 128
-        self.decoder_hidden: int = 128
+        self.inferrer_key: int = 32
+        self.distribution_embedding: int = 64
+        self.decoder_hidden: int = 64
         self.mlp_model_hidden: int = 256
         self.actor_critic_hidden: int = 64
 
 
 class Ablations(_BaseConfig):
     def __init__(self):
-        self.no_attn = False
         self.recur = False
         self.mlp = False
         self.offline = False
@@ -86,7 +84,7 @@ class Ablations(_BaseConfig):
 class OptimArgs(_BaseConfig):
     def __init__(self):
         self.lr = 1e-4
-        self.algorithm = "Adam"
+        self.algorithm = "AdamW"
         self.alg_args: Dict[str, Any] = {}
         self.batchsize = 128
         self.use_grad_clip = True

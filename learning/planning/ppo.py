@@ -5,14 +5,13 @@ from typing import Dict, Iterable, List, Optional, Sequence, Any
 import torch
 import torch.nn as nn
 
-from ..env_model.inferrer import DistributionDecoder
-from ..env_model.encoder import VariableConcat
+from ..env_model.modules import DistributionDecoder, VariableConcat
 from ..buffer import Buffer
 from ..config import Config
 from ..base import RLBase, BaseNN, Context
 from core import Batch, Transitions, Distributions
 from utils.typings import NamedValues
-from core import DType
+from core import DType, VType
 import utils as u
 
 
