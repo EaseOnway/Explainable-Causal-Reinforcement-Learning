@@ -81,7 +81,9 @@ class Test(Experiment):
                 if explain:
                     self.explainer.why(
                         self.trajectory.transitions[-5:],
-                        maxlen=5, thres=0.1, mode=True)
+                        maxlen=5, thres=0.1, mode=True,
+                        plotfile=str(self._file_path('causal-chain'))
+                    )
                     self.baseline.why(
                         self.env.state_of(transition.variables),
                         self.env.action_of(transition.variables)

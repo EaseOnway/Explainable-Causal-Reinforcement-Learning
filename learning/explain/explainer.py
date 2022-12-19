@@ -54,16 +54,15 @@ class Explainner(RLBase):
 
     def why(self, trajectory: Transitions, from_: Optional[Set[str]] = None,
             to: Optional[Set[str]] = None, maxlen: Optional[int] = None,
-            thres=0.1, complete=True, mode=False):
+            thres=0.1, complete=True, mode=False, plotfile='causal_chain'):
         
         np.set_printoptions(precision=5)
         maxlen = maxlen or trajectory.n
         chain = self.build_chain(trajectory, maxlen, from_, to, thres, mode)
-
         for t in range(len(chain)):
             print(chain.explain(t, complete))
         chain.summarize()
-        chain.plot(False).view()
+        chain.plot(plotfile, False).view()
 
     def whynot(self, trajectory: Transitions, action_cf: NamedValues,
                to: Optional[Set[str]] = None, maxlen: Optional[int] = None,

@@ -393,10 +393,25 @@ class CausalChain:
                 for s in nodes:
                     print(f"|\t{s.name} = {self.__text(s)} ")
 
-    def plot(self, only_chain=True):
+    def plot(self, filename = 'causal-chain', only_chain=True):
         from graphviz import Digraph
 
-        g = Digraph("causal chain", format='png')
+        g = Digraph(filename, format='png')
+        sub_gs = [Digraph(f"step_{t}")
+                 for t in range(len(self) + 1)]
+        
+        def weight_color(w: float, is_chain_edge: bool):
+            low = 0.25
+
+            w = np.clip(w, 0., 1.)
+            h = 0.33
+            if is_chain_edge:
+                s = low + (1 - low) * w
+                v = 1.0
+            else:
+                s = 0.
+                v = 1 - (low + (1 - low) * w)
+            return "%.3f %.3f %.3f" % (h, s, v)
 
         def node_id(node: CausalNode):
             if node.is_reward:
@@ -418,43 +433,67 @@ class CausalChain:
             
             attr = {}
             if node.in_chain:
-                attr['color'] = 'green'
-            
+                if node.is_reward or node.is_tail:
+                    attr["color"] = 'gold'
+                else:
+                    attr['color'] = 'green'
+
             if node.is_reward:
                 attr['shape'] = 'hexagon'
             else:
                 attr['shape'] = 'box'
             
-            g.node(node_id(node), node_label(node), **attr)
+            sub_gs[node.t].node(node_id(node), node_label(node), **attr)
             
             for parent, weight in node.parents.items():
                 if only_chain and not parent.in_chain:
                     continue
                 attr = {}
+                if node.is_reward and parent.in_chain:
+                    attr['color'] = 'gold'
+                else:
+                    attr['color'] = weight_color(
+                        weight or 1.0, 
+                        node.in_chain and parent.in_chain)
                 if weight is not None:
                     attr['headlabel'] = "%.2f" % weight
                     attr['labeldistance'] = "1.5" 
-                    attr['labelfontsize'] = "10.0" 
+                    attr['labelfontsize'] = "10.0"
+                    attr['labelfontcolor'] = "blue" 
                     # attr['weight'] = str(weight)
                 if not node.has_salient_parent(parent):
                     attr['style'] = 'dotted'
-                if node.in_chain and parent.in_chain:
-                    attr['color'] = 'green'
                 
                 if node.is_reward:
                     attr['dir'] = 'none'
 
                 g.edge(node_id(parent), node_id(node), **attr)
+        
         # nodes
         for t in range(len(self)):
             nodes = self._variable_nodes[t]
             if t == 0:
                 for name in self._env.names_s:
                     set_node(nodes[name])
+                # for pre, post in zip(self._env.names_s[:-1],
+                #                      self._env.names_s[1:]):
+                #     pre = node_id(nodes[pre])
+                #     post = node_id(nodes[post])
+                #     sub_gs[t].edge(pre, post, style='invis')
             for name in self._env.names_output:
                 set_node(nodes[name])
+            
+            # for pre, post in zip(self._env.names_output[:-1],
+            #                      self._env.names_output[1:]):
+            #     pre = node_id(nodes[pre])
+            #     post = node_id(nodes[post])
+            #     sub_gs[t+1].edge(pre, post, color='red')
 
             for r in self._reward_nodes[t].values():
                 set_node(r)
+
+        for t, sub_g in enumerate(sub_gs):
+            # sub_g.attr('graph', label=f'step {t}')
+            g.subgraph(sub_g)
 
         return g
