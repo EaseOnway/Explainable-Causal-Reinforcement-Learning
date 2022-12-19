@@ -1,5 +1,5 @@
 from learning.explain import Explainner
-from learning.env_model import AttnCausalModel
+from learning.env_model import CausalEnvModel
 from learning.planning import Actor
 from learning.buffer import Buffer
 from baselines import BaselineExplainner
@@ -9,29 +9,22 @@ import json
 
 
 class Test(Experiment):
+    use_existing_path = True
 
     def make_title(self):
         return 'test'
-    
-    @classmethod
-    def init_parser(cls, parser):
-        super().init_parser(parser)
 
-        parser.add_argument('--actor', type=str, required=True)
-        parser.add_argument('--env-model', type=str, required=True)
-        parser.add_argument('--graph', type=str, required=True)
-        parser.add_argument('--baseline', type=str, required=True)
     def setup(self):
         super().setup()
-        self.model = AttnCausalModel(self.context)
+        self.model = CausalEnvModel(self.context)
         self.actor = Actor(self.context)
-        self.actor.load(self.args.actor)
-        self.model.load(self.args.env_model)
+        self.actor.load(self.path / 'actor.nn')
+        self.model.load(self.path / 'explain-env-model.nn')
         self.explainer = Explainner(self.actor, self.model)
         self.baseline = BaselineExplainner(self.actor)
-        self.baseline.load(self.args.baseline)
+        self.baseline.load(self.path / 'explain-baseline.nn')
 
-        with open(self.args.graph, 'r') as f:
+        with open(self.path / 'explain-causal-graph.json', 'r') as f:
             graph = json.load(f)
             self.model.load_graph(graph)
 
@@ -88,7 +81,7 @@ class Test(Experiment):
                 if explain:
                     self.explainer.why(
                         self.trajectory.transitions[-5:],
-                        maxlen=5, thres=0.2, mode=True)
+                        maxlen=5, thres=0.1, mode=True)
                     self.baseline.why(
                         self.env.state_of(transition.variables),
                         self.env.action_of(transition.variables)
@@ -103,9 +96,5 @@ class Test(Experiment):
         self.env.reset()
 
 
-test = Test(['cancer',
-             r"--actor=experiments\cancer\model-free\run-7\actor.nn",
-             r"--env-model=experiments\cancer\explain\run-2\env-model-0.nn",
-             r"--graph=experiments\cancer\explain\run-2\causal-graph.json",
-             r"--baseline=experiments\cancer\explain\run-2\baselines.nn"])
+test = Test([r'--path=experiments\cartpole\mode-based\test'])
 test.execute()

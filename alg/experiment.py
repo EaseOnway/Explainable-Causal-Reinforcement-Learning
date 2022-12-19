@@ -8,8 +8,10 @@ from pathlib import Path
 import abc
 
 import argparse
+
 import absl.app as app
 from learning.base import Context, RLBase
+from learning.config import Config
 from ._env_setting import get_env_class, get_default_config
 
 
@@ -48,6 +50,8 @@ class Experiment(abc.ABC, RLBase):
     
     ROOT: Final = Path('./experiments/')
 
+    use_existing_path: bool
+
     @final
     @staticmethod
     def register(command: str, cls: Type['Experiment']):
@@ -83,11 +87,15 @@ class Experiment(abc.ABC, RLBase):
 
     @classmethod
     def init_parser(cls, parser: argparse.ArgumentParser):
-        parser.add_argument('env', type=str, help='environment identifier')
-        parser.add_argument('--config', '--cfg', type=str,
-                            help='path of experiment configuration (json)')
-        parser.add_argument('--run-id', type=str, help='path of the experiment data')
-        parser.add_argument('--seed', type=int, help='random seed')
+        if cls.use_existing_path:
+            parser.add_argument('--path', type=str, help='the experiment path')
+            parser.add_argument('--seed', type=int, help='random seed')
+        else:
+            parser.add_argument('env', type=str, help='environment identifier')
+            parser.add_argument('--config', '--cfg', type=str,
+                                help='path of experiment configuration (json)')
+            parser.add_argument('--run-id', type=str, help='path of the experiment data')
+            parser.add_argument('--seed', type=int, help='random seed')
 
     @final
     def __init__(self, argv: List[str]):
@@ -97,35 +105,62 @@ class Experiment(abc.ABC, RLBase):
                                          description=self.__class__.__doc__)
         self.init_parser(parser)
         exp_args, argv = parser.parse_known_args(argv)
-        self.env_id: Final[str] = exp_args.env
-
-        # setup environemnt
-        print(f"setting up environment: {self.env_id}")
-        env_class = get_env_class(self.env_id)
-        parser = argparse.ArgumentParser(prog=self.__class__.__name__,
-                                         description=self.__class__.__doc__)
-        env_class.init_parser(parser)
-        env_args, argv = parser.parse_known_args(argv)
-        env = env_class(env_args)
-
-        self.args: Final = Args(**vars(exp_args), **vars(env_args))
-
-        if len(argv) > 0:
-            print("warning. unexpected arguments: " + (' '.join(argv)))
-
-        # initializing
-        print("setting up experiment")
-        self.title: Final = self.make_title()
-        path, config = self.__setup()
-        self.path: Final = path
-        RLBase.__init__(self, Context(config, env))
         
-        self.setup()
+        if not self.use_existing_path:
+            # get environment
+            self.env_id: str = exp_args.env
+
+            # setup environemnt
+            print(f"setting up environment: {self.env_id}")
+            env_class = get_env_class(self.env_id)
+            parser = argparse.ArgumentParser(prog=self.__class__.__name__,
+                                            description=self.__class__.__doc__)
+            env_class.init_parser(parser)
+            env_args, argv = parser.parse_known_args(argv)
+            env = env_class(env_args)
+
+            self.args = Args(**vars(exp_args), **vars(env_args))
+
+            if len(argv) > 0:
+                print("warning. unexpected arguments: " + (' '.join(argv)))
+
+            # initializing
+            print("setting up experiment")
+            self.title = self.make_title()
+            path, config = self.__setup()
+            self.path = path
+            RLBase.__init__(self, Context(config, env))
+            self.setup()
+            
+            # save arguments
+            self.args.save(self._file_path('args', 'json'))
+            self.config.save(self._file_path('config', 'json'))
+            print(f"successfully initialized experiment at {self.path}")
         
-        # save arguments
-        self.args.save(self._file_path('args', 'json'))
-        self.config.save(self._file_path('config', 'json'))
-        print(f"successfully initialized experiment at {self.path}")
+        else:
+            self.args = Args(**vars(exp_args))
+            if len(argv) > 0:
+                print("warning. unexpected arguments: " + (' '.join(argv)))
+
+            print("resolving configuration")
+            old_args, config = self.__load_existing(exp_args)
+            self.env_id = old_args.env
+
+            print("creating environment:", self.env_id)
+            env_class = get_env_class(self.env_id)
+            env = env_class(old_args)
+
+            print("setting up experiment")
+            self.title = self.make_title()
+            self.path = Path(self.args.path)
+            RLBase.__init__(self, Context(config, env))
+            self.setup()
+            
+            # save arguments
+            self.args.save(self._file_path('args', 'json'))
+            self.config.save(self._file_path('config', 'json'))
+            print(f"successfully initialized experiment at {self.path}")
+
 
     @staticmethod
     def seed(x: int):
@@ -133,6 +168,20 @@ class Experiment(abc.ABC, RLBase):
         torch.cuda.manual_seed_all(x)
         np.random.seed(x)
         random.seed(x)
+
+    @final
+    def __load_existing(self, exp_args):
+        assert self.use_existing_path
+        path = Path(exp_args.path)
+
+        if not path.exists():
+            raise FileNotFoundError("path does not exist")
+        args = Args.load(path / "args.json")
+
+        config = Config()
+        config.load(path / "config.json")
+
+        return args, config
         
     @final
     def __setup(self):
@@ -195,7 +244,10 @@ class Experiment(abc.ABC, RLBase):
 
     @final
     def _file_path(self, name: str, fmt: Optional[str] = None):
-        path = self.path / name
+        if self.use_existing_path:
+            path = self.path / (self.title + '-' + name)
+        else:
+            path = self.path / name
         if fmt is not None:
             path = path.with_suffix('.' + fmt)
         return path

@@ -23,6 +23,8 @@ _RETURN = 'return'
 
 
 class ModelBasedRL(Train):
+    use_existing_path = False
+
     @classmethod
     def init_parser(cls, parser):
         super().init_parser(parser)
@@ -70,6 +72,10 @@ class ModelBasedRL(Train):
         self.env_models = self.creat_env_models(self.config.mbrl.ensemble_size)
         self.env_models.init_parameters()
         self.env_model_optimizers = self.env_models.optimizers()
+
+        # runtime variable
+        self.causal_interval = self.config.mbrl.causal_interval_min
+        self.graph_next_update = 0
     
     def dream(self, buffer: Buffer, n_sample: int, len_rollout: int):
         '''generate samples into the buffer using the environment model'''
@@ -130,10 +136,19 @@ class ModelBasedRL(Train):
         true_reward = log_step[_REWARD].mean
         true_return = log_step[_RETURN].mean
 
+        print(f"episodic return:\t{true_return}")
+        print(f"mean reward:\t{true_reward} (truth)")
+
         # fit causal equation
         if not self.ablations.offline\
-                and i_step % config.mbrl.interval_graph_update == 0:
+                and i_step >= self.graph_next_update:
             self.causal_discovery()
+            self.graph_next_update = int(max(i_step + 1, i_step + self.causal_interval))
+            self.causal_interval = min(
+                self.causal_interval + self.config.mbrl.causal_interval_increase,
+                self.config.mbrl.causal_interval_max)
+            print(f"next causal discovery will be at step {self.graph_next_update}")
+
             _, fit_eval = self.fit(config.mbrl.n_batch_fit_new_graph * config.mbrl.ensemble_size)
         else:
             _, fit_eval = self.fit(config.mbrl.n_batch_fit * config.mbrl.ensemble_size)

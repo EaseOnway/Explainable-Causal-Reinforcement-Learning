@@ -64,11 +64,12 @@ class NetDims(_BaseConfig):
     def __init__(self):
         self.variable_encoding: int = 64
         self.variable_encoder_hidden: int = 64
-        self.aggregator_hidden: int = 128
+        self.action_influce_embedding: int = 128
+        self.aggregator_hidden: int = 64
         self.inferrer_value: int = 128
-        self.inferrer_key: int = 32
-        self.distribution_embedding: int = 64
-        self.decoder_hidden: int = 64
+        self.inferrer_key: int = 64
+        self.distribution_embedding: int = 128
+        self.decoder_hidden: int = 128
         self.mlp_model_hidden: int = 256
         self.actor_critic_hidden: int = 64
 
@@ -79,7 +80,7 @@ class Ablations(_BaseConfig):
         self.mlp = False
         self.offline = False
         self.dense = False
-
+        self.no_attn = False
 
 class OptimArgs(_BaseConfig):
     def __init__(self):
@@ -111,7 +112,9 @@ class ModelArgs(_BaseConfig):
         self.buffer_size = 10000  
         self.optim = OptimArgs()
         self.prior = 0.25
-        self.pthres_independent = 0.05
+        self.pthres_max = 0.25
+        self.pthres_min = 0.05
+        self.n_sample_oracle = 10000
         self.n_jobs_fcit = -1
         
 class MBRLArgs(_BaseConfig):
@@ -123,7 +126,11 @@ class MBRLArgs(_BaseConfig):
         self.n_sample_warmup = 400
         self.dream_batch_size = 64
         self.explore_rate_max = 0.5  # exploration rate for estimating model
-        self.interval_graph_update = 5
+        
+        self.causal_interval_min: int = 1
+        self.causal_interval_max: int = 12
+        self.causal_interval_increase: Union[float, int] = 1
+
         self.n_round_planning = 25
         self.n_batch_fit = 50
         self.n_batch_fit_new_graph = 500

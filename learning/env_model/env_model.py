@@ -10,7 +10,8 @@ import random
 
 from core import Batch, Distributions, Transitions
 from ..base import BaseNN, Context, RLBase
-from .modules import VariableConcat, DistributionDecoder
+from .modules import StateKey, DistributionInferrer, DistributionDecoder, \
+    VariableEncoder, VariableConcat
 from utils.typings import NamedTensors, ParentDict, NamedArrays, NamedValues
 
 
@@ -19,9 +20,6 @@ class EnvModel(BaseNN):
         super().__init__(context)
 
     def forward(self, raw_data: Batch) -> Distributions:
-        raise NotImplementedError
-    
-    def load_graph(self, parent_dic: ParentDict):
         raise NotImplementedError
     
     def get_loglikeli_dic(self, raw_data: Batch):
@@ -53,6 +51,57 @@ class EnvModel(BaseNN):
         return self.F.get_optmizer(self.config.model.optim, self)
 
 
+class CausalEnvModel(EnvModel):
+
+    def __init__(self, context: Context):
+        super().__init__(context)
+
+        self.parent_dic: ParentDict = {}
+        self.parent_dic_s: ParentDict = {}
+        self.parent_dic_a: ParentDict = {}
+
+        self.encoder = VariableEncoder(context)
+        self.inferrers: Dict[str, DistributionInferrer] = {}
+        self.k_model = StateKey(context)
+
+        for name in self.env.names_output:
+            self.inferrers[name] = DistributionInferrer(self.v(name), context)
+            self.add_module(f'{name}_inferrer', self.inferrers[name])
+    
+    def load_graph(self, parent_dic: ParentDict):
+        self.parent_dic.clear()
+        self.parent_dic_s.clear()
+        self.parent_dic_a.clear()
+
+        for name in self.env.names_output:
+            try:
+                parents = set(parent_dic[name])
+            except KeyError:
+                parents = set()
+
+            self.parent_dic[name] = tuple(sorted(parents))
+            self.parent_dic_s[name] = tuple(sorted(
+                pa for pa in parents if pa in self.env.names_s))
+            self.parent_dic_a[name] = tuple(sorted(
+                pa for pa in parents if pa in self.env.names_a))
+
+    def forward(self, raw_data: Batch) -> Distributions:
+        data = raw_data.kapply(self.raw2input)
+        encoded_data = self.encoder.forward_all(data)
+        outs = Distributions(data.n)
+
+        for var in self.env.names_output:
+            inferrer = self.inferrers[var]
+            parents_a = self.parent_dic_a[var]
+            parents_s = self.parent_dic_s[var]
+            actions_pa, k_states, states_pa = inferrer.input_from(\
+                parents_a, parents_s, encoded_data, self.k_model)
+            out = inferrer.forward(actions_pa, k_states, states_pa)
+            outs[var] = out
+
+        return outs
+
+
 class MLPEnvModel(EnvModel):
 
     def __init__(self, context: Context):
@@ -66,6 +115,7 @@ class MLPEnvModel(EnvModel):
             nn.Linear(dim, dim, **self.torchargs),
         )
         self.decoders: Dict[str, DistributionDecoder] = {}
+        self.k_model = StateKey(context)
 
         for name in self.env.names_output:
             self.decoders[name] = DistributionDecoder(dim, self.v(name), context)
@@ -108,7 +158,8 @@ class EnvModelEnsemble(EnvModel):
 
     def load_graph(self, parent_dic: ParentDict):
         for network in self.networks:
-            network.load_graph(parent_dic)
+            if isinstance(network, CausalEnvModel):
+                network.load_graph(parent_dic)
 
     def random_select(self):
         i = random.randrange(len(self.networks))

@@ -12,7 +12,8 @@ from core import Batch, Transitions, Tag
 from learning.buffer import Buffer
 from learning.causal_discovery import discover
 from learning.planning import PPO, Actor
-import learning.env_model as em
+from learning.env_model import RolloutGenerator, CausalEnvModel, MLPEnvModel,\
+    EnvModelEnsemble, EnvModel
 
 from utils import Log, RewardScaling
 from utils.typings import ParentDict, NamedArrays, ParentDict
@@ -32,7 +33,7 @@ _RETURN = 'return'
 class Train(Experiment):
 
     def setup(self):
-        log_path = self.path / 'log'
+        log_path = self._file_path("log")
         if not log_path.exists():
             os.makedirs(log_path)
         
@@ -40,7 +41,7 @@ class Train(Experiment):
 
         # probable attributes
         # model
-        self.env_models: em.EnvModelEnsemble
+        self.env_models: EnvModelEnsemble
         self.env_model_optimizers: Tuple[torch.optim.Optimizer, ...]
         # planning algorithm
         self.ppo: PPO
@@ -52,17 +53,14 @@ class Train(Experiment):
         # declear runtime variables
         self.n_sample = 0
     
-    def creat_env_models(self, ensemble_size: int) -> em.EnvModelEnsemble:
+    def creat_env_models(self, ensemble_size: int) -> EnvModelEnsemble:
         if self.config.ablations.mlp:
-            return em.EnvModelEnsemble(self.context, 
-                tuple(em.MLPEnvModel(self.context) for _ in range(ensemble_size)))
-        elif self.config.ablations.recur:
-            return em.EnvModelEnsemble(self.context, 
-                tuple(em.RecurrentCausalModel(self.context) for _ in range(ensemble_size)))
+            return EnvModelEnsemble(self.context, 
+                tuple(MLPEnvModel(self.context) for _ in range(ensemble_size)))
         else:
-            return em.EnvModelEnsemble(self.context, 
-                tuple(em.AttnCausalModel(self.context) for _ in range(ensemble_size)))
-
+            return EnvModelEnsemble(self.context, 
+                tuple(CausalEnvModel(self.context) for _ in range(ensemble_size)))
+    
     def collect(self, buffer: Buffer, n_sample: int, explore_rate: Optional[float],
                 reward_scaling: bool, actor: Optional[Actor] = None):
         '''collect real-world samples into the buffer, and compute returns'''
@@ -131,7 +129,10 @@ class Train(Experiment):
     @final
     def causal_graph(self, graph: ParentDict):
         self.__causal_graph = graph
-        self.env_models.load_graph(self.__causal_graph)
+        if not self.config.ablations.mlp:
+            assert(isinstance(self.env_models, CausalEnvModel) or
+                   isinstance(self.env_models, EnvModelEnsemble))
+            self.env_models.load_graph(self.__causal_graph)
     
     def evaluate_policy(self, n_sample: int):
         '''collect real-world samples into the buffer, and compute returns'''
@@ -170,7 +171,7 @@ class Train(Experiment):
         path = self._file_path(name, fmt)
         if fmt == 'json':
             with path.open('w') as f:
-                json.dump(o, f)
+                json.dump(o, f, indent=4)
         else:
             torch.save(o, path)
 
@@ -266,6 +267,15 @@ class Train(Experiment):
             pass
         else:
             data = self.__get_data_for_causal_discovery()
+
+            b = self.config.model.pthres_max
+            a = self.config.model.pthres_min
+            assert a <= b
+            n_orc = self.config.model.n_sample_oracle
+            n = len(self.buffer_m)
+            pthres = float(np.clip(b - (n / n_orc) * (b - a), a, b))
+            print(f"perform causal disocery with threshold {pthres}")
+        
             self.causal_graph = discover(
-                data, self.env, self.config.model.pthres_independent,
+                data, self.env, pthres,
                 True, self.config.model.n_jobs_fcit)

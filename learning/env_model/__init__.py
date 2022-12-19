@@ -1,3 +1,2 @@
-from .env_model import MLPEnvModel, EnvModel, EnvModelEnsemble
-from .causal_model import CausalModel, AttnCausalModel, RecurrentCausalModel
+from .env_model import MLPEnvModel, CausalEnvModel, EnvModel, EnvModelEnsemble
 from .simulate import RolloutGenerator

@@ -17,7 +17,7 @@ class Cancer(Env):
     @classmethod
     def init_parser(cls, parser):
         parser.add_argument("--price", type=float, default=1.)
-        parser.add_argument("--env-noise", type=float, default=0.01)
+        parser.add_argument("--env-noise", type=float, default=0.)
     
     def launch(self):
         pass
@@ -75,8 +75,8 @@ class Cancer(Env):
         
         c_ = c + delta_c
         if treat:
-            cost = 5. - c_
-            c_ = 5.
+            cost = 3. - c_
+            c_ = 3.
         else:
             cost = 0.
         
@@ -93,3 +93,12 @@ class Cancer(Env):
     
     def random_action(self):
         return {TREAT: np.random.rand() < 0.5}
+
+    @property
+    def true_causal_graph(self):
+        return {
+            NEXT[P]: (P, Q, QP, C),
+            NEXT[C]: (TREAT, C),
+            NEXT[Q]: (P, C, Q),
+            NEXT[QP]: (QP, Q, C),
+            COST: (C, TREAT)}

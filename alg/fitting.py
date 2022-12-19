@@ -15,6 +15,8 @@ _NLL_LOSS = 'NLL loss'
 
 
 class Fitting(Train):
+    use_existing_path = False
+
     @classmethod
     def init_parser(cls, parser):
         super().init_parser(parser)

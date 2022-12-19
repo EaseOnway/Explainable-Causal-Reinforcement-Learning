@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Iterable, Set, L
 import numpy as np
 import torch
 
-from ..env_model import AttnCausalModel
+from ..env_model import CausalEnvModel
 from ..planning import Actor
 from utils.typings import NamedValues, SortedNames
 from core import Env
@@ -18,15 +18,16 @@ np.set_printoptions(precision=5)
 
 
 class CausalNode:
-    def __init__(self, name: str, value: Any, t: int, is_reward: bool):
+    def __init__(self, name: str, value: Any, t: int, is_reward: bool, thres: float):
         self.name = name
         self.value = value
         self.t = t
-        self.parents: List[CausalNode] = []
+        self.parents: Dict[CausalNode, Optional[float]] = {}
         self.is_reward = is_reward
         self.reached = False
         self.in_chain = False
         self.is_tail = False
+        self.thres = thres
 
     def __back(self):
         assert self.in_chain
@@ -35,15 +36,23 @@ class CausalNode:
                 pa.in_chain = True
                 pa.__back()
     
-    def add_parent(self, node: "CausalNode"):
-        self.parents.append(node)
-        if node.reached:
+    def add_parent(self, node: "CausalNode", weight: Optional[float]):
+        self.parents[node] = weight
+        if node.reached and (weight is None or weight >= self.thres):
             self.reached = True
     
+    def has_salient_parent(self, parent: "CausalNode"):
+        try:
+            w = self.parents[parent]
+            return w is None or w >= self.thres
+        except KeyError:
+            return False
+
     def propagate(self):
+        assert self.reached
         self.in_chain = True
         for parent in self.parents:
-            if parent.reached and not parent.in_chain:
+            if parent.reached and self.has_salient_parent(parent):
                 parent.propagate()
             if self.is_reward:
                 parent.is_tail = True
@@ -56,7 +65,7 @@ class CausalNode:
 
 
 class CausalChain:
-    def __init__(self, net: AttnCausalModel, thres: float,
+    def __init__(self, net: CausalEnvModel, thres: float,
                  from_: Optional[Set[str]] = None,
                  to: Optional[Set[str]] = None,
                  mode=True):
@@ -71,6 +80,8 @@ class CausalChain:
         self._discount = net.config.rl.discount
         self.__from = from_ or set(self._env.names_a)
         self.__to = to or set(self._env.rewarders.keys())
+
+        self.ablation = net.ablations
 
     @property
     def next_vnodes(self):
@@ -91,54 +102,47 @@ class CausalChain:
     def __len__(self):
         return len(self._transitions)
     
-    def step(self, transition: Env.Transition, attn: torch.Tensor):
+    def step(self, transition: Env.Transition):
         assert not self.terminated
         if self.t == 0:
-            ae = ActionEffect(self._env, self._net.causal_graph,
-                              transition, attn, self.__from)
+            ae = ActionEffect(self._net, self._env.action_of(transition.variables),
+                              self.__from)
             self._variable_nodes.append({})
             self._reward_nodes.append({})
             for name in self._env.names_s:
                 value = transition.variables[name]
-                node = CausalNode(name, value, 0, False)
+                node = CausalNode(name, value, 0, False, 0)
                 node.reached = True
                 self.next_vnodes[name] = node
         else:
-            ae = ActionEffect(self._env, self._net.causal_graph,
-                              transition, attn)
+            ae = ActionEffect(self._net, self._env.action_of(transition.variables))
 
         for name_out in self._env.names_o:
-            node = CausalNode(name_out, transition.variables[name_out], self.t, False)
+            node = CausalNode(name_out, transition.variables[name_out], self.t, False, self._thres)
             for name_in in ae.who_cause(name_out):
-                if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
-                    node.add_parent(self.next_vnodes[name_in])
-            if self.t == 0:
-                for a in self.__from:
-                    if ae[a, name_out] >= self._thres: 
-                        node.reached = True
-                        break
+                node.add_parent(self.next_vnodes[name_in],
+                                None if self.ablation.no_attn else ae[name_in, name_out])
+            if self.t == 0 and ae[name_out] >= self._thres: 
+                node.reached = True
             self.next_vnodes[name_out] = node
 
         next_dict: Dict[str, CausalNode] = {}
 
         for name_s, name_out in self._env.nametuples_s:
-            node = CausalNode(name_s, transition.variables[name_out], self.t + 1, False)
-            for name_in in self._env.names_s:
-                if name_in in self.next_vnodes and ae[name_in, name_out] >= self._thres:
-                    node.add_parent(self.next_vnodes[name_in])
-            if self.t == 0:
-                for a in self.__from:
-                    if ae[a, name_out] >= self._thres: 
-                        node.reached = True
-                        break
-            self.next_vnodes[name_out] = node
+            node = CausalNode(name_s, transition.variables[name_out], self.t + 1, False, self._thres)
+            for name_in in ae.who_cause(name_out):
+                node.add_parent(self.next_vnodes[name_in],
+                                None if self.ablation.no_attn else ae[name_in, name_out])
+            if self.t == 0 and ae[name_out] >= self._thres: 
+                node.reached = True
             next_dict[name_s] = node
+            self.next_vnodes[name_out] = node
 
         for label, rewarder in self._env.rewarders.items():
             r = rewarder(transition.variables)
-            node = CausalNode(label, r, self.t, True)
+            node = CausalNode(label, r, self.t, True, 0)
             for source in rewarder.source:
-                node.add_parent(self.next_vnodes[source])
+                node.add_parent(self.next_vnodes[source], None)
             self.next_rnodes[label] = node
             if node.name in self.__to and node.reached:
                 node.propagate()
@@ -157,18 +161,17 @@ class CausalChain:
         variables.update(outs)
         terminated = self._env.terminated(variables)
         reward = self._env.reward(variables)
-        attn = self._net.weight.squeeze(0)
-        return Env.Transition(variables, reward, terminated), attn
+        return Env.Transition(variables, reward, terminated)
 
     def follow(self, a: Union[NamedValues, Actor]):
         assert self.t > 0
         s = self._env.state_shift(self._transitions[-1].variables)
-        transition, attn = self.__simulate(s, a)
-        self.step(transition, attn)
+        transition = self.__simulate(s, a)
+        self.step(transition)
     
     def start(self, s: NamedValues, a: Union[NamedValues, Actor]):
-        transition, attn = self.__simulate(s, a)
-        self.step(transition, attn)
+        transition = self.__simulate(s, a)
+        self.step(transition)
 
     def __get_intervals(self, t: int, names: SortedNames, complete=True):
             out: List[CausalNode] = []
@@ -198,7 +201,7 @@ class CausalChain:
                 for s in interval_states:
                     lines.append(f"|\t|\t{s.name} = {self.__text(s)}")
 
-        if self.t == 0:
+        if self.step == 0:
             lines.append(f"|\tWe take the given action:")
         else:
             lines.append(f"|\tWe will possibly take an action like:")
@@ -424,14 +427,24 @@ class CausalChain:
             
             g.node(node_id(node), node_label(node), **attr)
             
-            for parent in node.parents:
+            for parent, weight in node.parents.items():
                 if only_chain and not parent.in_chain:
                     continue
+                attr = {}
+                if weight is not None:
+                    attr['headlabel'] = "%.2f" % weight
+                    attr['labeldistance'] = "1.5" 
+                    attr['labelfontsize'] = "10.0" 
+                    # attr['weight'] = str(weight)
+                if not node.has_salient_parent(parent):
+                    attr['style'] = 'dotted'
                 if node.in_chain and parent.in_chain:
-                    g.edge(node_id(parent), node_id(node), color='green')
-                else:
-                    g.edge(node_id(parent), node_id(node))
+                    attr['color'] = 'green'
+                
+                if node.is_reward:
+                    attr['dir'] = 'none'
 
+                g.edge(node_id(parent), node_id(node), **attr)
         # nodes
         for t in range(len(self)):
             nodes = self._variable_nodes[t]

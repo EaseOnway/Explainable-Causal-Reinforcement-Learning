@@ -36,13 +36,16 @@ def get_default_config(env_name: str):
     config.rl.n_epoch_actor = 2
     config.rl.n_epoch_critic = 16
     config.rl.optim.lr = 1e-4
-    config.model.pthres_independent = 0.15
+    config.model.pthres_max = 0.2
+    config.model.pthres_min = 0.1
     config.rl.optim.batchsize = 512
     config.model.optim.lr = 1e-4
     config.model.optim.max_grad_norm = 1.0
     config.mbrl.explore_rate_max = 0.5
     config.mbrl.n_round_planning = 20
-    config.mbrl.interval_graph_update = 3
+    config.mbrl.causal_interval_min = 1
+    config.mbrl.causal_interval_max = 15
+    config.mbrl.causal_interval_increase = 1
     config.mbrl.ensemble_size = 5
 
     if env_name == 'cartpole':
@@ -54,6 +57,7 @@ def get_default_config(env_name: str):
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
+        config.model.n_sample_oracle = 10000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 256
@@ -71,6 +75,7 @@ def get_default_config(env_name: str):
         config.rl.max_episode_length = 128
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
+        config.model.n_sample_oracle = 12800
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
@@ -88,6 +93,7 @@ def get_default_config(env_name: str):
         config.rl.max_episode_length = 128
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
+        config.model.n_sample_oracle = 12800
         config.mbrl.n_batch_fit = 400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
@@ -105,6 +111,7 @@ def get_default_config(env_name: str):
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
+        config.model.n_sample_oracle = 50000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 1024
@@ -118,15 +125,18 @@ def get_default_config(env_name: str):
         config.rl.discount = 0.95
         config.rl.gae_lambda = 0.9
         config.rl.kl_penalty = 0.2
-        config.rl.entropy_penalty = 0.05
+        config.rl.entropy_penalty = 0.1
         config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
+        config.model.n_sample_oracle = 20000
+        config.model.pthres_max = 0.3
+        config.model.pthres_min = 0.1
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 80
-        config.mbrl.n_sample_exploit = 80
-        config.mbrl.n_sample_warmup = 400
+        config.mbrl.n_sample_exploit = 160
+        config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 8)
         config.model.n_jobs_fcit = 16
