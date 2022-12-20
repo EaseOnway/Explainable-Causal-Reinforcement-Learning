@@ -401,7 +401,7 @@ class CausalChain:
                  for t in range(len(self) + 1)]
         
         def weight_color(w: float, is_chain_edge: bool):
-            low = 0.25
+            low = 0.1
 
             w = np.clip(w, 0., 1.)
             h = 0.33

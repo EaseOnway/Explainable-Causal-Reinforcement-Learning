@@ -39,7 +39,6 @@ class ActionEffect(RLBase):
         with torch.no_grad():
             batch = raw.kapply(self.raw2input)
             action_enc = network.encoder.forward_all(batch)
-            a_embs: NamedTensors = {}
             causations: Dict[str, Tuple[str]] = {}
             attns: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
             causal_weights: Dict[str, Dict[str, float]] = {}
@@ -71,7 +70,6 @@ class ActionEffect(RLBase):
                     causal_weight_action[var] = float(weight_a)
 
         self.__action_enc = action_enc
-        self.__embs_a = a_embs
         self.__causations = causations
         self.__attns = attns
         self.__causal_weights = causal_weights
@@ -89,44 +87,6 @@ class ActionEffect(RLBase):
 
     def who_cause(self, name: str):
         return self.__causations[name]
-
-    def infer(self, var: str, causal_states: Sequence[Any]):
-        with torch.no_grad():
-            weight = self.__attns[var]
-            emb_a = self.__embs_a[var]
-            caus = self.__causations[var]
-            states = []
-            for pa, state in zip(caus, causal_states):
-                raw = self.v(pa).tensor(state, self.device)
-                raw = raw.unsqueeze_(0)
-                s = self.raw2input(pa, raw)
-                states.append(self.network.encoder.forward(pa, s))
-            states = self.T.safe_stack(states, (1, self.dims.variable_encoding))
-            inferrer = self.network.inferrers[var]
-            temp: torch.Tensor = inferrer.attn_infer(*weight, emb_a, states)
-            temp = inferrer.feed_forward(temp)
-            distri = inferrer.decoder.forward(temp)
-            temp = distri.mode
-            temp = temp.squeeze(0)
-            out = self.T.t2a(temp, self.v(var).dtype.numpy)
-        return out
-
-    def __get_causal_eq(self, var: str):
-        def causal_eq(*args):
-            return self.infer(var, args)
-        return causal_eq
-
-    def create_causal_model(self):
-        m = scm.StructrualCausalModel()
-        for var in self.env.names_s:
-            m[var] = scm.ExoVar(name=var)
-        for var in self.env.names_output:
-            m[var] = scm.EndoVar(
-                [m[pa] for pa in self.__causations[var]],
-                self.__get_causal_eq(var),
-                name = var,
-            )
-        return m
 
     def print_info(self):
         for var in self.env.names_output:

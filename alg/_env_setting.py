@@ -52,7 +52,7 @@ def get_default_config(env_name: str):
         config.rl.n_sample = 1024
         config.rl.discount = 0.98
         config.rl.gae_lambda = 0.95
-        config.rl.kl_penalty = 0.1
+        config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
@@ -70,7 +70,7 @@ def get_default_config(env_name: str):
         config.rl.n_sample = 128
         config.rl.discount = 0.95
         config.rl.gae_lambda = 0.9
-        config.rl.kl_penalty = 0.1
+        config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
         config.rl.max_episode_length = 128
         config.model.buffer_size = 100000
@@ -88,7 +88,7 @@ def get_default_config(env_name: str):
         config.rl.n_sample = 128
         config.rl.discount = 0.95
         config.rl.gae_lambda = 0.9
-        config.rl.kl_penalty = 0.1
+        config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
         config.rl.max_episode_length = 128
         config.model.buffer_size = 100000
@@ -106,7 +106,7 @@ def get_default_config(env_name: str):
         config.rl.n_sample = 2048
         config.rl.discount = 0.98
         config.rl.gae_lambda = 0.975
-        config.rl.kl_penalty = 0.04
+        config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
@@ -129,7 +129,7 @@ def get_default_config(env_name: str):
         config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 20000
+        config.model.n_sample_oracle = 10000
         config.model.pthres_max = 0.3
         config.model.pthres_min = 0.1
         config.mbrl.n_batch_fit =  400

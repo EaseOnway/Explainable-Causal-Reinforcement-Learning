@@ -16,17 +16,19 @@ class VariableEncoder(BaseNN):
         
         self.sub_modules: Dict[str, nn.Module] = {}
 
+        d_h = self.dims.variable_encoder_hidden
+        d_out = self.dims.variable_encoding
         for var in self.env.names_input:
             d_in = self.v(var).size
-            d_h = self.dims.variable_encoder_hidden
-            d_out = self.dims.variable_encoding
-
             self.sub_modules[var] = nn.Sequential(
                 nn.Linear(d_in, d_h, **self.torchargs),
                 nn.PReLU(d_h, **self.torchargs),
                 nn.Linear(d_h, d_h, **self.torchargs),
                 nn.LeakyReLU(),
-                nn.Linear(d_h, d_out, **self.torchargs))
+                nn.Linear(d_h, d_out, **self.torchargs),
+                # nn.BatchNorm1d(d_out, **self.torchargs),
+                nn.BatchNorm1d(d_out, affine=False, **self.torchargs),
+            )
 
         for key, linear in self.sub_modules.items():
             self.add_module(f"{key}_encoder", linear)
@@ -101,7 +103,8 @@ class StateKey(BaseNN):
         self.idx_map = {k: i for i, k in enumerate(self.env.names_s)}
         self.K = nn.parameter.Parameter(
             torch.zeros(self.env.num_s, self.dims.inferrer_key,
-                        **self.torchargs))
+                        **self.torchargs)
+        )
 
     def forward(self, state_names: Sequence[str]):
         i = tuple(self.idx_map[name] for name in state_names)

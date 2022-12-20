@@ -23,6 +23,7 @@ class RolloutGenerator(RLBase):
 
     def __transit(self, states_and_actions: Batch):
         with torch.no_grad():
+            self.net.train(False)
             out = self.net.forward(states_and_actions)
             out = out.sample().kapply(self.label2raw)
         return out

@@ -34,6 +34,8 @@ class Explainner(RLBase):
             maxlen: int, from_: Optional[Set[str]] = None, to: Optional[Set[str]] = None,
             thres=0.1, mode=False):
 
+        self.env_model.train(False)
+
         ch = CausalChain(self.env_model, thres, from_, to, mode)
         if isinstance(startup, dict):
             ch.start(startup, self.actor)

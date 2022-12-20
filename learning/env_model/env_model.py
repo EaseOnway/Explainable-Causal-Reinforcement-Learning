@@ -113,6 +113,7 @@ class MLPEnvModel(EnvModel):
             nn.Linear(self.encoder.size, dim, **self.torchargs),
             nn.LeakyReLU(),
             nn.Linear(dim, dim, **self.torchargs),
+            nn.BatchNorm1d(dim, **self.torchargs)
         )
         self.decoders: Dict[str, DistributionDecoder] = {}
         self.k_model = StateKey(context)

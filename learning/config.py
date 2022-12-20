@@ -116,6 +116,7 @@ class ModelArgs(_BaseConfig):
         self.pthres_min = 0.05
         self.n_sample_oracle = 10000
         self.n_jobs_fcit = -1
+        self.sparse_factor = 0.01
         
 class MBRLArgs(_BaseConfig):
     def __init__(self):

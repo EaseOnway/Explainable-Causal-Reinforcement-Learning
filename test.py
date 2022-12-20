@@ -82,7 +82,7 @@ class Test(Experiment):
                     self.explainer.why(
                         self.trajectory.transitions[-5:],
                         maxlen=5, thres=0.1, mode=True,
-                        plotfile=str(self._file_path('causal-chain'))
+                        plotfile=str(self._file_path('causal-chain')),
                     )
                     self.baseline.why(
                         self.env.state_of(transition.variables),
@@ -97,6 +97,6 @@ class Test(Experiment):
 
         self.env.reset()
 
+Experiment.register('test', Test)
+Experiment.run(['test', r'--path=experiments\buildmarine\test'])
 
-test = Test([r'--path=experiments\cartpole\mode-based\test'])
-test.execute()

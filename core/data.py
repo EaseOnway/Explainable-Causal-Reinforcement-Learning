@@ -207,5 +207,3 @@ class Distributions:
     def entropy(self):
         kls = list(self.entropies().values())
         return torch.sum(torch.stack(kls, dim=1), dim=1)
-
-

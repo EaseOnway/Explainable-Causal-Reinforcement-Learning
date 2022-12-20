@@ -68,7 +68,7 @@ class Cartpole(Env):
         return tran, info
 
     def terminated(self, transition) -> bool:
-        return self.__fail(transition[POSITION], transition[ANGLE])
+        return self.__fail(transition[NEXT[POSITION]], transition[NEXT[ANGLE]])
 
     def random_action(self):
         a = self.__core.action_space.sample()

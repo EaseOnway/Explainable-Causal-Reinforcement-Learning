@@ -32,7 +32,7 @@ class ModelBasedRL(Train):
         parser.add_argument('--n-step', type=int, default=200)
 
     def make_title(self):
-        title = "mode-based"
+        title = "model-based"
         ablation = self.args.ablation
         if self.args.ablation is None:
             return title
