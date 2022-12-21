@@ -38,7 +38,7 @@ class ActionEffect(RLBase):
 
         with torch.no_grad():
             batch = raw.kapply(self.raw2input)
-            action_enc = network.encoder.forward_all(batch)
+            action_enc = network.encoder.forward(batch)
             causations: Dict[str, Tuple[str]] = {}
             attns: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
             causal_weights: Dict[str, Dict[str, float]] = {}

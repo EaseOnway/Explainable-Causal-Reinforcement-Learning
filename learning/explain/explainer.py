@@ -64,7 +64,7 @@ class Explainner(RLBase):
         for t in range(len(chain)):
             print(chain.explain(t, complete))
         chain.summarize()
-        chain.plot(plotfile, False).view()
+        chain.plot(plotfile, True).view()
 
     def whynot(self, trajectory: Transitions, action_cf: NamedValues,
                to: Optional[Set[str]] = None, maxlen: Optional[int] = None,

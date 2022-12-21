@@ -21,8 +21,8 @@ class Test(Experiment):
         self.actor.load(self.path / 'actor.nn')
         self.model.load(self.path / 'explain-env-model.nn')
         self.explainer = Explainner(self.actor, self.model)
-        self.baseline = BaselineExplainner(self.actor)
-        self.baseline.load(self.path / 'explain-baseline.nn')
+        # self.baseline = BaselineExplainner(self.actor)
+        # self.baseline.load(self.path / 'explain-baseline.nn')
 
         with open(self.path / 'explain-causal-graph.json', 'r') as f:
             graph = json.load(f)
@@ -83,11 +83,12 @@ class Test(Experiment):
                         self.trajectory.transitions[-5:],
                         maxlen=5, thres=0.1, mode=True,
                         plotfile=str(self._file_path('causal-chain')),
+                        to={'getting close'}
                     )
-                    self.baseline.why(
-                        self.env.state_of(transition.variables),
-                        self.env.action_of(transition.variables)
-                    )
+                    # self.baseline.why(
+                    #     self.env.state_of(transition.variables),
+                    #     self.env.action_of(transition.variables)
+                    # )
                 if transition.terminated:
                     print(f"episode {episode} terminated.")
                     episode += 1
@@ -98,5 +99,5 @@ class Test(Experiment):
         self.env.reset()
 
 Experiment.register('test', Test)
-Experiment.run(['test', r'--path=experiments\buildmarine\test'])
-
+# Experiment.run(['test', r'--path=experiments\buildmarine\test'])
+Experiment.run(['test', r'--path=experiments\lunarlander\model-based\test'])

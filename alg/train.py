@@ -196,6 +196,15 @@ class Train(Experiment):
     def warmup(self, n_sample: int, explore_rate: Optional[float]):
         return self.collect(self.buffer_m, n_sample, explore_rate,
                             self.config.rl.use_reward_scaling)
+    
+    def update_variable_normalizer(self):
+        for name in self.env.names_input:
+            data = self.buffer_m[name].to(device=self.device)
+            value = self.v(name).raw2input(data)
+            std, mean = torch.std_mean(value, dim=0)
+            for model in self.env_models:
+                if isinstance(model, CausalEnvModel):
+                    model.encoder[name].load_std_mean(std, mean)
 
     def __fit_batch(self, transitions: Transitions, eval=False):
         i, net = self.env_models.random_select()
@@ -224,6 +233,9 @@ class Train(Experiment):
         train_log = Log()
         batch_size = self.config.model.optim.batchsize
         interval = n_batch // 20
+
+        print(f"setting up normalizer")
+        self.update_variable_normalizer()
 
         print(f"start fitting...")
         self.env_models.train(True)

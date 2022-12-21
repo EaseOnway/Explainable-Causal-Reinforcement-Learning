@@ -87,7 +87,7 @@ class CausalEnvModel(EnvModel):
 
     def forward(self, raw_data: Batch) -> Distributions:
         data = raw_data.kapply(self.raw2input)
-        encoded_data = self.encoder.forward_all(data)
+        encoded_data = self.encoder.forward(data)
         outs = Distributions(data.n)
 
         for var in self.env.names_output:
@@ -113,7 +113,6 @@ class MLPEnvModel(EnvModel):
             nn.Linear(self.encoder.size, dim, **self.torchargs),
             nn.LeakyReLU(),
             nn.Linear(dim, dim, **self.torchargs),
-            nn.BatchNorm1d(dim, **self.torchargs)
         )
         self.decoders: Dict[str, DistributionDecoder] = {}
         self.k_model = StateKey(context)

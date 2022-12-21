@@ -8,41 +8,61 @@ from core import Batch
 from learning.config import Config
 from ..base import BaseNN, Context
 from core.vtype import VType
+from ..buffer import Buffer
 
+
+class _VariableEncoder(BaseNN):
+    def __init__(self, context: Context, varname: str):
+        super().__init__(context)
+
+        self.vtype = vtype = self.v(varname)
+        self.varname = varname
+        
+        self.mean: torch.Tensor
+        self.std: torch.Tensor
+        self.register_buffer('mean', torch.zeros(vtype.size, **self.torchargs))
+        self.register_buffer('std', torch.ones(vtype.size, **self.torchargs))
+
+        d_h = self.dims.variable_encoder_hidden
+        d_out = self.dims.variable_encoding
+        self.f = nn.Sequential(
+            nn.Linear(vtype.size, d_h, **self.torchargs),
+            nn.PReLU(d_h, **self.torchargs),
+            nn.Linear(d_h, d_h, **self.torchargs),
+            nn.LeakyReLU(),
+            nn.Linear(d_h, d_out, **self.torchargs),
+            # nn.BatchNorm1d(d_out, **self.torchargs),
+            # nn.BatchNorm1d(d_out, affine=False, **self.torchargs),
+            # nn.LayerNorm(d_out, elementwise_affine=False, **self.torchargs)
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        data = (data - self.mean) / self.std + 1e-5
+        return self.f(data)
+    
+    def load_std_mean(self, std: torch.Tensor, mean: torch.Tensor):
+        self.mean[:] = mean.to(**self.torchargs)
+        self.std[:] = std.to(**self.torchargs)
 
 class VariableEncoder(BaseNN):
     def __init__(self, context: Context):
         super().__init__(context)
         
-        self.sub_modules: Dict[str, nn.Module] = {}
-
-        d_h = self.dims.variable_encoder_hidden
-        d_out = self.dims.variable_encoding
+        self.__sub_modules: Dict[str, _VariableEncoder] = {}
         for var in self.env.names_input:
-            d_in = self.v(var).size
-            self.sub_modules[var] = nn.Sequential(
-                nn.Linear(d_in, d_h, **self.torchargs),
-                nn.PReLU(d_h, **self.torchargs),
-                nn.Linear(d_h, d_h, **self.torchargs),
-                nn.LeakyReLU(),
-                nn.Linear(d_h, d_out, **self.torchargs),
-                # nn.BatchNorm1d(d_out, **self.torchargs),
-                nn.BatchNorm1d(d_out, affine=False, **self.torchargs),
-            )
+            self.__sub_modules[var] = _VariableEncoder(context, var)
+        for key, encoder in self.__sub_modules.items():
+            self.add_module(f"{key}_encoder", encoder)
+        
+    def __getitem__(self, name: str):
+        return self.__sub_modules[name]
 
-        for key, linear in self.sub_modules.items():
-            self.add_module(f"{key}_encoder", linear)
-
-    def forward_all(self, data: Batch):
+    def forward(self, data: Batch):
         out = Batch(data.n)
-        for var in self.sub_modules.keys():
+        for var, sub_model in self.__sub_modules.items():
             if var in data:
-                out[var] = self.forward(var, data[var])
+                out[var] = sub_model.forward(data[var])
         return out
-
-    def forward(self, var: str, data: torch.Tensor) -> torch.Tensor:
-        sub_module = self.sub_modules[var]
-        return sub_module(data)
 
 
 class Aggregator(BaseNN):
@@ -184,7 +204,7 @@ class Inferrer(BaseNN):
         va: torch.Tensor = self.linear_va(emb_a)   # batch * dim_v
         v = torch.cat((vs, va.unsqueeze(0)), dim=0)  # (num_states + 1) * batch * dim_v
         v: torch.Tensor = self.layernorm(v)
-        
+
         a = torch.cat((attn_s, attn_a.unsqueeze(0)), dim=0)  # (num_states + 1) * batch
         a = a.view((num_state + 1), batch_size, 1)
         

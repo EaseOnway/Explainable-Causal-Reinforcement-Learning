@@ -185,6 +185,7 @@ class Buffer(RLBase):
         state_dict = torch.load(path)
         self.load_state_dict(state_dict)
 
+
 class _TensorGetter:
     def __init__(self, __buffer: 'Buffer'):
         self.__buffer = __buffer

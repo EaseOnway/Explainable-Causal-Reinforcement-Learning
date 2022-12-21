@@ -47,8 +47,11 @@ def get_default_config(env_name: str):
     config.mbrl.causal_interval_max = 15
     config.mbrl.causal_interval_increase = 1
     config.mbrl.ensemble_size = 5
+    config.model.n_jobs_fcit = 8
 
     if env_name == 'cartpole':
+        config.dims.variable_encoder_hidden = 64
+        config.dims.variable_encoding = 64
         config.rl.n_sample = 1024
         config.rl.discount = 0.98
         config.rl.gae_lambda = 0.95
@@ -64,9 +67,10 @@ def get_default_config(env_name: str):
         config.mbrl.n_sample_exploit = 256
         config.mbrl.n_sample_warmup = 1024
         config.mbrl.n_sample_rollout = 4096
-        config.mbrl.rollout_length = (1, 20)
-        config.model.n_jobs_fcit = 16
+        config.mbrl.rollout_length = (1, 10)
     elif env_name == 'collect':
+        config.dims.variable_encoder_hidden = 128
+        config.dims.variable_encoding = 128
         config.rl.n_sample = 128
         config.rl.discount = 0.95
         config.rl.gae_lambda = 0.9
@@ -82,9 +86,10 @@ def get_default_config(env_name: str):
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (1, 5)
-        config.model.n_jobs_fcit = 16
+        config.mbrl.rollout_length = (4, 10)
     elif env_name == 'buildmarine':
+        config.dims.variable_encoder_hidden = 64
+        config.dims.variable_encoding = 64
         config.rl.n_sample = 128
         config.rl.discount = 0.95
         config.rl.gae_lambda = 0.9
@@ -100,9 +105,10 @@ def get_default_config(env_name: str):
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (1, 5)
-        config.model.n_jobs_fcit = 16
+        config.mbrl.rollout_length = (4, 10)
     elif env_name == 'lunarlander':
+        config.dims.variable_encoder_hidden = 128
+        config.dims.variable_encoding = 128
         config.rl.n_sample = 2048
         config.rl.discount = 0.98
         config.rl.gae_lambda = 0.975
@@ -118,9 +124,10 @@ def get_default_config(env_name: str):
         config.mbrl.n_sample_exploit = 1024
         config.mbrl.n_sample_warmup = 4096
         config.mbrl.n_sample_rollout = 4096
-        config.mbrl.rollout_length = (1, 20)
-        config.model.n_jobs_fcit = 16
+        config.mbrl.rollout_length = (1, 10)
     elif env_name == 'cancer':
+        config.dims.variable_encoder_hidden = 64
+        config.dims.variable_encoding = 64
         config.rl.n_sample = 256
         config.rl.discount = 0.95
         config.rl.gae_lambda = 0.9
@@ -139,6 +146,5 @@ def get_default_config(env_name: str):
         config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 8)
-        config.model.n_jobs_fcit = 16
 
     return config
