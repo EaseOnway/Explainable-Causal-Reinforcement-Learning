@@ -16,10 +16,19 @@ class RolloutGenerator(RLBase):
     def __init__(self, net: EnvModel, env_buffer: Buffer,
                  len_rollout: Optional[int] = None):
         super().__init__(net.context)
+
         self.__true_env = net.env
-        self.env_buffer = env_buffer
         self.net = net
+        self.env_buffer = env_buffer
         self.k = len_rollout
+
+    # def __get_init_buffer(self, buffer: Buffer):
+    #     initiated = buffer.transitions[:].initiated.cpu()
+    #     transitions = buffer.transitions[initiated]
+    #     new_buffer = Buffer(self.context, max_size=transitions.n)
+    #     new_buffer.append(transitions)
+    #     assert torch.all(new_buffer.transitions[:].initiated)
+    #     return new_buffer
 
     def __transit(self, states_and_actions: Batch):
         with torch.no_grad():

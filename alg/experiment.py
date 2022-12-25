@@ -227,7 +227,7 @@ class Experiment(abc.ABC, RLBase):
 
     def configure(self):
         args = self.args
-        config = get_default_config(self.env_id)
+        config = get_default_config(self.env_id, self.args)
         if args.config is not None:
             config_path = Path(args.config).with_suffix('.json')
             with config_path.open('r') as f:

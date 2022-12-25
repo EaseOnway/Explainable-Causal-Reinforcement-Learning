@@ -37,7 +37,7 @@ class _VariableEncoder(BaseNN):
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        data = (data - self.mean) / self.std + 1e-5
+        data = (data - self.mean) / (self.std + 1e-5)
         return self.f(data)
     
     def load_std_mean(self, std: torch.Tensor, mean: torch.Tensor):
@@ -149,7 +149,7 @@ class Inferrer(BaseNN):
             self.linear_va = nn.Linear(d_emb, dv, **self.torchargs)
             self.linear_q = nn.Linear(d_emb, dk, **self.torchargs)
             self.layernorm = nn.LayerNorm([dv], **self.torchargs,
-                                          elementwise_affine=False)
+                                          elementwise_affine=True)
 
         self.feed_forward = nn.Sequential(
             nn.Linear(dv, dff, **self.torchargs),
@@ -203,13 +203,13 @@ class Inferrer(BaseNN):
         vs: torch.Tensor = self.linear_vs(states)  # num_states * batch * dim_v
         va: torch.Tensor = self.linear_va(emb_a)   # batch * dim_v
         v = torch.cat((vs, va.unsqueeze(0)), dim=0)  # (num_states + 1) * batch * dim_v
-        v: torch.Tensor = self.layernorm(v)
+        # 
 
         a = torch.cat((attn_s, attn_a.unsqueeze(0)), dim=0)  # (num_states + 1) * batch
         a = a.view((num_state + 1), batch_size, 1)
         
         v = torch.sum(v * a, dim=0)
-        
+        v: torch.Tensor = self.layernorm(v)
         return v  # batch * dim_v
 
     def __attn_infer(self, actions: torch.Tensor, kstates: torch.Tensor,

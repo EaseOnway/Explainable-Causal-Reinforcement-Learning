@@ -116,7 +116,7 @@ class ModelBasedRL(Train):
             
         assert i_sample == n_sample
         return log
-    
+
     def __step(self, i_step: int, n_step: int):
         config = self.config
         print(f"---------------step {i_step} / {n_step}----------------")

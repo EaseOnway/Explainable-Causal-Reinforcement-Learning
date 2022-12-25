@@ -28,9 +28,9 @@ class Cartpole(Env):
         _def.state(ANGLE, ContinuousNormal(scale=None))
         _def.state(ANGLE_VLOCITY, ContinuousNormal(scale=None))
         _def.action(PUSH, NamedCategorical('left', 'right'))
-        _def.reward('failure', [NEXT[POSITION], NEXT[ANGLE]],
-                    lambda x, a: -10 * float(self.__fail(x, a)))
-    
+        _def.reward('upright', [NEXT[POSITION], NEXT[ANGLE]],
+                    lambda x, a: 1 * float(not self.__fail(x, a)))
+
         return _def
 
     @classmethod

@@ -29,25 +29,25 @@ def get_env_class(env_id: str):
         raise e
 
 
-def get_default_config(env_name: str):
+def get_default_config(env_name: str, args):
     
     config = Config()
     config.device_id = 'cuda'
     config.rl.n_epoch_actor = 2
     config.rl.n_epoch_critic = 16
     config.rl.optim.lr = 1e-4
-    config.model.pthres_max = 0.2
-    config.model.pthres_min = 0.1
+    config.model.pthres_max = 0.5
+    config.model.pthres_min = 0.15
     config.rl.optim.batchsize = 512
     config.model.optim.lr = 1e-4
     config.model.optim.max_grad_norm = 1.0
-    config.mbrl.explore_rate_max = 0.5
+    config.mbrl.explore_rate_max = 0.8
     config.mbrl.n_round_planning = 20
-    config.mbrl.causal_interval_min = 1
-    config.mbrl.causal_interval_max = 15
-    config.mbrl.causal_interval_increase = 1
+    config.mbrl.causal_interval_min = 3
+    config.mbrl.causal_interval_max = 3
+    config.mbrl.causal_interval_increase = 0.1
     config.mbrl.ensemble_size = 5
-    config.model.n_jobs_fcit = 8
+    config.model.n_jobs_fcit = 16
 
     if env_name == 'cartpole':
         config.dims.variable_encoder_hidden = 64
@@ -57,17 +57,17 @@ def get_default_config(env_name: str):
         config.rl.gae_lambda = 0.95
         config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
-        config.rl.max_episode_length = 128
+        config.rl.max_episode_length = 200
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 10000
+        config.model.n_sample_oracle = 5000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
-        config.mbrl.n_sample_explore = 256
-        config.mbrl.n_sample_exploit = 256
-        config.mbrl.n_sample_warmup = 1024
+        config.mbrl.n_sample_explore = 400
+        config.mbrl.n_sample_exploit = 400
+        config.mbrl.n_sample_warmup = 1200
         config.mbrl.n_sample_rollout = 4096
-        config.mbrl.rollout_length = (1, 10)
+        config.mbrl.rollout_length = (1, 5)
     elif env_name == 'collect':
         config.dims.variable_encoder_hidden = 128
         config.dims.variable_encoding = 128
@@ -76,10 +76,10 @@ def get_default_config(env_name: str):
         config.rl.gae_lambda = 0.9
         config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
-        config.rl.max_episode_length = 128
+        config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 12800
+        config.model.n_sample_oracle = 20000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
@@ -95,17 +95,17 @@ def get_default_config(env_name: str):
         config.rl.gae_lambda = 0.9
         config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
-        config.rl.max_episode_length = 128
+        config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 12800
+        config.model.n_sample_oracle = 10000
         config.mbrl.n_batch_fit = 400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (4, 10)
+        # config.mbrl.rollout_length = (4, 10)
     elif env_name == 'lunarlander':
         config.dims.variable_encoder_hidden = 128
         config.dims.variable_encoding = 128
@@ -113,11 +113,30 @@ def get_default_config(env_name: str):
         config.rl.discount = 0.98
         config.rl.gae_lambda = 0.975
         config.rl.kl_penalty = 0.2
+        config.rl.entropy_penalty = 0.004 if args.continuous else 0.04
+        config.rl.max_episode_length = 1024
+        config.model.buffer_size = 200000
+        config.model.optim.batchsize = 1024
+        config.model.n_sample_oracle = 200000
+        config.mbrl.n_batch_fit =  400
+        config.mbrl.n_batch_fit_new_graph = 800
+        config.mbrl.n_sample_explore = 1024
+        config.mbrl.n_sample_exploit = 1024
+        config.mbrl.n_sample_warmup = 4096
+        config.mbrl.n_sample_rollout = 4096
+        config.mbrl.rollout_length = (1, 10)
+    elif env_name == 'taxi':
+        config.dims.variable_encoder_hidden = 128
+        config.dims.variable_encoding = 128
+        config.rl.n_sample = 2048
+        config.rl.discount = 0.99
+        config.rl.gae_lambda = 0.97
+        config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.04
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 50000
+        config.model.n_sample_oracle = 100000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 1024

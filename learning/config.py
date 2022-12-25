@@ -127,11 +127,9 @@ class MBRLArgs(_BaseConfig):
         self.n_sample_warmup = 400
         self.dream_batch_size = 64
         self.explore_rate_max = 0.5  # exploration rate for estimating model
-        
         self.causal_interval_min: int = 1
         self.causal_interval_max: int = 12
         self.causal_interval_increase: Union[float, int] = 1
-
         self.n_round_planning = 25
         self.n_batch_fit = 50
         self.n_batch_fit_new_graph = 500

@@ -83,7 +83,7 @@ class Test(Experiment):
                         self.trajectory.transitions[-5:],
                         maxlen=5, thres=0.1, mode=True,
                         plotfile=str(self._file_path('causal-chain')),
-                        to={'getting close'}
+                        # to={'getting close'}
                     )
                     # self.baseline.why(
                     #     self.env.state_of(transition.variables),
@@ -100,4 +100,5 @@ class Test(Experiment):
 
 Experiment.register('test', Test)
 # Experiment.run(['test', r'--path=experiments\buildmarine\test'])
-Experiment.run(['test', r'--path=experiments\lunarlander\model-based\test'])
+# Experiment.run(['test', r'--path=experiments\lunarlander\model-based\test'])
+Experiment.run(['test', r'--path=E:\OneDrive\工作\temp'])
