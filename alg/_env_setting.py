@@ -110,8 +110,8 @@ def get_default_config(env_name: str, args):
         config.dims.variable_encoder_hidden = 128
         config.dims.variable_encoding = 128
         config.rl.n_sample = 2048
-        config.rl.discount = 0.98
-        config.rl.gae_lambda = 0.975
+        config.rl.discount = 0.975
+        config.rl.gae_lambda = 0.94
         config.rl.kl_penalty = 0.2
         config.rl.entropy_penalty = 0.004 if args.continuous else 0.04
         config.rl.max_episode_length = 1024
