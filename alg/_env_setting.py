@@ -86,7 +86,7 @@ def get_default_config(env_name: str, args):
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (4, 10)
+        config.mbrl.rollout_length = (3, 8)
     elif env_name == 'buildmarine':
         config.dims.variable_encoder_hidden = 64
         config.dims.variable_encoding = 64
@@ -105,7 +105,7 @@ def get_default_config(env_name: str, args):
         config.mbrl.n_sample_exploit = 64
         config.mbrl.n_sample_warmup = 512
         config.mbrl.n_sample_rollout = 2048
-        # config.mbrl.rollout_length = (4, 10)
+        config.mbrl.rollout_length = (3, 8)
     elif env_name == 'lunarlander':
         config.dims.variable_encoder_hidden = 128
         config.dims.variable_encoding = 128
