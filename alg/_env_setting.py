@@ -113,8 +113,8 @@ def get_default_config(env_name: str, args):
         config.rl.discount = 0.975
         config.rl.gae_lambda = 0.94
         config.rl.kl_penalty = 0.2
-        config.rl.entropy_penalty = 0.004 if args.continuous else 0.04
-        config.rl.max_episode_length = 1024
+        config.rl.entropy_penalty = 0.005 if args.continuous else 0.04
+        config.rl.max_episode_length = 512
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
         config.model.n_sample_oracle = 200000

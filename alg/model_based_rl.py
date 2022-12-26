@@ -1,15 +1,17 @@
 from typing import Any, Callable, Dict, List, Literal, Optional, final, Tuple
 import torch
 import numpy as np
+import random
 
 from .train import Train
 
 from core import Batch, Transitions, Tag
 from learning.buffer import Buffer
-from learning.planning import PPO
+from learning.planning import PPO, Actor
 from learning.env_model import RolloutGenerator
 
 from utils import Log, RewardScaling
+import utils
 
 
 
@@ -76,6 +78,8 @@ class ModelBasedRL(Train):
         # runtime variable
         self.causal_interval = self.config.mbrl.causal_interval_min
         self.graph_next_update = 0
+        self.i_step = 0
+        self.n_step: int = self.args.n_step
     
     def dream(self, buffer: Buffer, n_sample: int, len_rollout: int):
         '''generate samples into the buffer using the environment model'''
@@ -117,7 +121,8 @@ class ModelBasedRL(Train):
         assert i_sample == n_sample
         return log
 
-    def __step(self, i_step: int, n_step: int):
+    def __step(self):
+        i_step, n_step = self.i_step, self.n_step
         config = self.config
         print(f"---------------step {i_step} / {n_step}----------------")
 
@@ -217,8 +222,76 @@ class ModelBasedRL(Train):
             self.save(self.causal_graph, 'causal-graph', 'json')
 
     def main(self):
-        n_step: int = self.args.n_step
         print("warming up")
         self.warmup(self.config.mbrl.n_sample_warmup, 1.)
-        for i_step in range(n_step):
-            self.__step(i_step, n_step)
+        for i_step in range(self.n_step):
+            self.i_step = i_step
+            self.__step()
+
+
+class ModelBasedRLLunarLander(ModelBasedRL):
+
+    def collect(self, buffer: Buffer, n_sample: int, explore_rate: Optional[float],
+                reward_scaling: bool, actor: Optional[Actor] = None):
+        '''collect real-world samples into the buffer, and compute returns'''
+
+        def get_explore_rate():
+            return random.uniform(0, self.config.mbrl.explore_rate_max)
+
+        log = Log()
+        
+        max_len = self.config.rl.max_episode_length
+        if max_len is not None:
+            max_len = int(128 + (max_len - 128) * (self.i_step / self.n_step))
+        print(f"max episode length = {max_len}")
+
+        self.env.reset()
+        episodic_return = 0.
+        actor = actor or self.ppo.actor
+
+        if explore_rate is None:
+            explore_rate = get_explore_rate()
+            _explore_rate_fixed = False
+        else:
+            _explore_rate_fixed = True
+
+        for i_sample in range(n_sample):
+            initiated = self.env.t == 0
+
+            # interact with the environment
+            if utils.Random.event(explore_rate):
+                a = self.env.random_action()
+            else:
+                a = actor.act(self.env.current_state, False)
+
+            transition = self.env.step(a)
+            reward = transition.reward
+            terminated = transition.terminated
+            truncated = (self.env.t == max_len)
+
+            # reset environment
+            if truncated:
+                self.env.reset()
+
+            # record information
+            episodic_return += reward
+            log[_REWARD] = reward
+            if truncated or terminated:
+                log[_RETURN] = episodic_return
+                episodic_return = 0.
+            
+            if (truncated or terminated) and not _explore_rate_fixed:
+                explore_rate = get_explore_rate()
+
+            # truncate the last sample
+            if i_sample == n_sample - 1:
+                truncated = True
+
+            # write buffer
+            tagcode = Tag.encode(terminated, truncated, initiated)
+            if reward_scaling:
+                reward = self.reward_scaling(reward, (truncated or terminated))
+            buffer.write(transition.variables, reward, tagcode)
+
+        return log
+    
