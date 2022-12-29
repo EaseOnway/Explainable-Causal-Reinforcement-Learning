@@ -454,7 +454,8 @@ class CausalChain:
                 else:
                     attr['color'] = weight_color(
                         weight or 1.0, 
-                        node.in_chain and parent.in_chain)
+                        node.in_chain and parent.in_chain and
+                        node.has_salient_parent(parent))
                 if weight is not None:
                     attr['headlabel'] = "%.2f" % weight
                     attr['labeldistance'] = "1.5" 
@@ -475,25 +476,13 @@ class CausalChain:
             if t == 0:
                 for name in self._env.names_s:
                     set_node(nodes[name])
-                # for pre, post in zip(self._env.names_s[:-1],
-                #                      self._env.names_s[1:]):
-                #     pre = node_id(nodes[pre])
-                #     post = node_id(nodes[post])
-                #     sub_gs[t].edge(pre, post, style='invis')
             for name in self._env.names_output:
                 set_node(nodes[name])
-            
-            # for pre, post in zip(self._env.names_output[:-1],
-            #                      self._env.names_output[1:]):
-            #     pre = node_id(nodes[pre])
-            #     post = node_id(nodes[post])
-            #     sub_gs[t+1].edge(pre, post, color='red')
 
             for r in self._reward_nodes[t].values():
                 set_node(r)
 
         for t, sub_g in enumerate(sub_gs):
-            # sub_g.attr('graph', label=f'step {t}')
             g.subgraph(sub_g)
 
         return g

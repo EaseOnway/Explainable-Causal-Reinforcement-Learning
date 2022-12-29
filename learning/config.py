@@ -112,9 +112,10 @@ class ModelArgs(_BaseConfig):
         self.buffer_size = 10000  
         self.optim = OptimArgs()
         self.prior = 0.25
-        self.pthres_max = 0.25
-        self.pthres_min = 0.05
-        self.n_sample_oracle = 10000
+        self.pthres = 0.15
+        # self.pthres_max = 0.25
+        # self.pthres_min = 0.05
+        # self.n_sample_oracle = 10000
         self.n_jobs_fcit = -1
         self.sparse_factor = 0.01
         

@@ -280,12 +280,13 @@ class Train(Experiment):
         else:
             data = self.__get_data_for_causal_discovery()
 
-            b = self.config.model.pthres_max
-            a = self.config.model.pthres_min
-            assert a <= b
-            n_orc = self.config.model.n_sample_oracle
-            n = len(self.buffer_m)
-            pthres = float(np.clip(b - (n / n_orc) * (b - a), a, b))
+            # b = self.config.model.pthres_max
+            # a = self.config.model.pthres_min
+            # assert a <= b
+            # n_orc = self.config.model.n_sample_oracle
+            # n = len(self.buffer_m)
+            # pthres = float(np.clip(b - (n / n_orc) * (b - a), a, b))
+            pthres = self.config.model.pthres
             print(f"perform causal disocery with threshold {pthres}")
         
             self.causal_graph = discover(

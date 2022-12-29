@@ -36,8 +36,9 @@ def get_default_config(env_name: str, args):
     config.rl.n_epoch_actor = 2
     config.rl.n_epoch_critic = 16
     config.rl.optim.lr = 1e-4
-    config.model.pthres_max = 0.5
-    config.model.pthres_min = 0.15
+    config.model.pthres = 0.5
+    # config.model.pthres_max = 0.5
+    # config.model.pthres_min = 0.15
     config.rl.optim.batchsize = 512
     config.model.optim.lr = 1e-4
     config.model.optim.max_grad_norm = 1.0
@@ -60,7 +61,7 @@ def get_default_config(env_name: str, args):
         config.rl.max_episode_length = 200
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 5000
+        # config.model.n_sample_oracle = 5000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 400
@@ -79,7 +80,7 @@ def get_default_config(env_name: str, args):
         config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 20000
+        # config.model.n_sample_oracle = 20000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
@@ -98,7 +99,7 @@ def get_default_config(env_name: str, args):
         config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 10000
+        # config.model.n_sample_oracle = 10000
         config.mbrl.n_batch_fit = 400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 64
@@ -117,7 +118,7 @@ def get_default_config(env_name: str, args):
         config.rl.max_episode_length = 512
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 200000
+        # config.model.n_sample_oracle = 200000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 1024
@@ -136,7 +137,7 @@ def get_default_config(env_name: str, args):
         config.rl.max_episode_length = 128
         config.model.buffer_size = 200000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 100000
+        # config.model.n_sample_oracle = 100000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 1024
@@ -155,9 +156,7 @@ def get_default_config(env_name: str, args):
         config.rl.max_episode_length = 40
         config.model.buffer_size = 100000
         config.model.optim.batchsize = 1024
-        config.model.n_sample_oracle = 10000
-        config.model.pthres_max = 0.3
-        config.model.pthres_min = 0.1
+        # config.model.n_sample_oracle = 10000
         config.mbrl.n_batch_fit =  400
         config.mbrl.n_batch_fit_new_graph = 800
         config.mbrl.n_sample_explore = 80

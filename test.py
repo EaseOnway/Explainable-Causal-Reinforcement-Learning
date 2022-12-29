@@ -85,6 +85,11 @@ class Test(Experiment):
                         plotfile=str(self._file_path('causal-chain')),
                         # to={'getting close'}
                     )
+                    self.explainer.whynot(
+                        self.trajectory.transitions[-5:], self.env.random_action(),
+                        maxlen=5, thres=0.15, mode=True,
+                        # to={'getting close'}
+                    )
                     # self.baseline.why(
                     #     self.env.state_of(transition.variables),
                     #     self.env.action_of(transition.variables)
@@ -100,5 +105,5 @@ class Test(Experiment):
 
 Experiment.register('test', Test)
 # Experiment.run(['test', r'--path=experiments\buildmarine\test'])
-# Experiment.run(['test', r'--path=experiments\lunarlander\model-based\test'])
-Experiment.run(['test', r'--path=E:\OneDrive\工作\temp'])
+# Experiment.run(['test', r'--path=experiments\cartpole\test'])
+Experiment.run(['test', r'--path=E:\OneDrive\工作\dense'])
