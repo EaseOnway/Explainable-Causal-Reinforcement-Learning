@@ -88,7 +88,7 @@ class Experiment(abc.ABC, RLBase):
     @classmethod
     def init_parser(cls, parser: argparse.ArgumentParser):
         if cls.use_existing_path:
-            parser.add_argument('--path', type=str, help='the experiment path')
+            parser.add_argument('path', type=str, help='the experiment path')
             parser.add_argument('--seed', type=int, help='random seed')
         else:
             parser.add_argument('env', type=str, help='environment identifier')

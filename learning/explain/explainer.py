@@ -35,7 +35,7 @@ class Explainner(RLBase):
             thres=0.1, mode=False):
 
         self.env_model.train(False)
-
+        terminated = False
         ch = CausalChain(self.env_model, thres, from_, to, mode)
         if isinstance(startup, dict):
             ch.start(startup, self.actor)
@@ -46,12 +46,15 @@ class Explainner(RLBase):
             for i in range(min(maxlen, startup.n)):
                 transition = startup.at(i)
                 ch.step(transition)
+                if transition.terminated:
+                    terminated = True
+                    break
 
-        while ch.t < (maxlen or 9999):
+        while not terminated and ch.t < (maxlen or 9999):
             ch.follow(self.actor)
             if ch.terminated:
-                break
-        
+                terminated = True
+
         return ch
 
     def why(self, trajectory: Transitions, from_: Optional[Set[str]] = None,
@@ -64,7 +67,7 @@ class Explainner(RLBase):
         for t in range(len(chain)):
             print(chain.explain(t, complete))
         chain.summarize()
-        chain.plot(plotfile, False).view()
+        chain.plot(plotfile, True).view()
 
     def whynot(self, trajectory: Transitions, action_cf: NamedValues,
                to: Optional[Set[str]] = None, maxlen: Optional[int] = None,

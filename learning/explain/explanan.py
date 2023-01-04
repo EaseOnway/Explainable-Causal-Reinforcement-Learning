@@ -221,7 +221,7 @@ class CausalChain:
             else:
                 lines.append(f"|\tThese will cause the states to possibly transit to")
             for s in interval_nextstates:
-                lines.append(f"|\t|\t{s.name} = {self.__text(s)} ")
+                lines.append(f"|\t|\t{Env.name_next(s.name)} = {self.__text(s)}")
 
         rewards = [n for n in self._reward_nodes[t].values() if n.in_chain]
         discount = self._discount**t

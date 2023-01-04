@@ -27,6 +27,13 @@ class ModelFreeRL(Train):
     
     def make_title(self):
         return "model-free"
+    
+    def configure(self):
+        config = super().configure()
+        if self.args.config is None:
+            config.rl.n_epoch_actor = 8
+            config.rl.n_epoch_critic = 64
+        return config
 
     def setup(self):
         super().setup()

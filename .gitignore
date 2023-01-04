@@ -151,9 +151,5 @@ cython_debug/
 # experiments
 experiments/
 
-# config
-*.config.json
-config.json
-
 # vscode
 .vscode/

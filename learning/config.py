@@ -45,7 +45,11 @@ class _BaseConfig:
     @final
     def load_dict(self, d: Dict):
         for k, v in d.items():
-            temp = getattr(self, k)
+            try:
+                temp = getattr(self, k)
+            except AttributeError:
+                print(f"config warning: can not parse '{k}'")
+                continue
             if isinstance(temp, _BaseConfig):
                 temp.load_dict(v)
             else:
@@ -113,11 +117,7 @@ class ModelArgs(_BaseConfig):
         self.optim = OptimArgs()
         self.prior = 0.25
         self.pthres = 0.15
-        # self.pthres_max = 0.25
-        # self.pthres_min = 0.05
-        # self.n_sample_oracle = 10000
         self.n_jobs_fcit = -1
-        self.sparse_factor = 0.01
         
 class MBRLArgs(_BaseConfig):
     def __init__(self):

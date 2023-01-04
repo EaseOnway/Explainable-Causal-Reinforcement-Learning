@@ -1,21 +1,15 @@
 from typing import Dict, Callable, Type
 from envs.lunar_lander import LunarLander
 from envs.sc2_biuld_marines import SC2BuildMarine
-from envs.sc2_collect import SC2Collect
-from envs.taxi import Taxi
 from envs.cartpole import Cartpole
-from envs.cancer import Cancer
 from core import Env
 from learning.config import Config
 
 
 ALL_ENVS: Dict[str, Type[Env]] = {
     'lunarlander': LunarLander,
-    'collect': SC2Collect,
-    'taxi': Taxi,
     'cartpole': Cartpole,
     'buildmarine': SC2BuildMarine,
-    'cancer': Cancer,
 }
 
 
@@ -36,7 +30,7 @@ def get_default_config(env_name: str, args):
     config.rl.n_epoch_actor = 2
     config.rl.n_epoch_critic = 16
     config.rl.optim.lr = 1e-4
-    config.model.pthres = 0.5
+    config.model.pthres = 0.2
     # config.model.pthres_max = 0.5
     # config.model.pthres_min = 0.15
     config.rl.optim.batchsize = 512
@@ -69,25 +63,6 @@ def get_default_config(env_name: str, args):
         config.mbrl.n_sample_warmup = 1200
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 5)
-    elif env_name == 'collect':
-        config.dims.variable_encoder_hidden = 128
-        config.dims.variable_encoding = 128
-        config.rl.n_sample = 128
-        config.rl.discount = 0.95
-        config.rl.gae_lambda = 0.9
-        config.rl.kl_penalty = 0.2
-        config.rl.entropy_penalty = 0.04
-        config.rl.max_episode_length = 40
-        config.model.buffer_size = 100000
-        config.model.optim.batchsize = 1024
-        # config.model.n_sample_oracle = 20000
-        config.mbrl.n_batch_fit =  400
-        config.mbrl.n_batch_fit_new_graph = 800
-        config.mbrl.n_sample_explore = 64
-        config.mbrl.n_sample_exploit = 64
-        config.mbrl.n_sample_warmup = 512
-        config.mbrl.n_sample_rollout = 2048
-        config.mbrl.rollout_length = (3, 8)
     elif env_name == 'buildmarine':
         config.dims.variable_encoder_hidden = 64
         config.dims.variable_encoding = 64
@@ -126,43 +101,5 @@ def get_default_config(env_name: str, args):
         config.mbrl.n_sample_warmup = 4096
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 10)
-    elif env_name == 'taxi':
-        config.dims.variable_encoder_hidden = 128
-        config.dims.variable_encoding = 128
-        config.rl.n_sample = 2048
-        config.rl.discount = 0.99
-        config.rl.gae_lambda = 0.97
-        config.rl.kl_penalty = 0.2
-        config.rl.entropy_penalty = 0.04
-        config.rl.max_episode_length = 128
-        config.model.buffer_size = 200000
-        config.model.optim.batchsize = 1024
-        # config.model.n_sample_oracle = 100000
-        config.mbrl.n_batch_fit =  400
-        config.mbrl.n_batch_fit_new_graph = 800
-        config.mbrl.n_sample_explore = 1024
-        config.mbrl.n_sample_exploit = 1024
-        config.mbrl.n_sample_warmup = 4096
-        config.mbrl.n_sample_rollout = 4096
-        config.mbrl.rollout_length = (1, 10)
-    elif env_name == 'cancer':
-        config.dims.variable_encoder_hidden = 64
-        config.dims.variable_encoding = 64
-        config.rl.n_sample = 256
-        config.rl.discount = 0.95
-        config.rl.gae_lambda = 0.9
-        config.rl.kl_penalty = 0.2
-        config.rl.entropy_penalty = 0.1
-        config.rl.max_episode_length = 40
-        config.model.buffer_size = 100000
-        config.model.optim.batchsize = 1024
-        # config.model.n_sample_oracle = 10000
-        config.mbrl.n_batch_fit =  400
-        config.mbrl.n_batch_fit_new_graph = 800
-        config.mbrl.n_sample_explore = 80
-        config.mbrl.n_sample_exploit = 160
-        config.mbrl.n_sample_warmup = 512
-        config.mbrl.n_sample_rollout = 4096
-        config.mbrl.rollout_length = (1, 8)
 
     return config
