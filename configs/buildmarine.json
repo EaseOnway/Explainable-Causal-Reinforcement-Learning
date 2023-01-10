@@ -1,0 +1,88 @@
+{
+    "dims": {
+        "variable_encoding": 64,
+        "variable_encoder_hidden": 64,
+        "action_influce_embedding": 128,
+        "aggregator_hidden": 64,
+        "inferrer_value": 128,
+        "inferrer_key": 64,
+        "distribution_embedding": 128,
+        "decoder_hidden": 128,
+        "mlp_model_hidden": 256,
+        "actor_critic_hidden": 64
+    },
+    "ablations": {
+        "recur": false,
+        "mlp": false,
+        "offline": false,
+        "dense": false,
+        "no_attn": false
+    },
+    "model": {
+        "buffer_size": 100000,
+        "optim": {
+            "lr": 0.0001,
+            "algorithm": "AdamW",
+            "alg_args": {},
+            "batchsize": 1024,
+            "use_grad_clip": true,
+            "max_grad_norm": 1.0
+        },
+        "prior": 0.25,
+        "pthres": 0.15,
+        "n_jobs_fcit": 16
+    },
+    "rl": {
+        "discount": 0.97,
+        "gae_lambda": 0.93,
+        "kl_penalty": 0.2,
+        "entropy_penalty": 0.05,
+        "n_epoch_critic": 16,
+        "n_epoch_actor": 2,
+        "optim": {
+            "lr": 0.0001,
+            "algorithm": "AdamW",
+            "alg_args": {},
+            "batchsize": 512,
+            "use_grad_clip": true,
+            "max_grad_norm": 1.0
+        },
+        "use_adv_norm": true,
+        "max_episode_length": 40,
+        "use_reward_scaling": true,
+        "n_sample": 120
+    },
+    "mbrl": {
+        "rollout_length": [
+            5,
+            10
+        ],
+        "n_sample_rollout": 2048,
+        "n_sample_explore": 60,
+        "n_sample_exploit": 60,
+        "n_sample_warmup": 600,
+        "dream_batch_size": 64,
+        "explore_rate_max": 0.2,
+        "causal_interval_min": 3,
+        "causal_interval_max": 5,
+        "causal_interval_increase": 0.1,
+        "n_round_planning": 20,
+        "n_batch_fit": 400,
+        "n_batch_fit_new_graph": 800,
+        "ensemble_size": 5
+    },
+    "device_id": "cuda",
+    "baseline": {
+        "sparse_factor": 0.001,
+        "optim": {
+            "lr": 0.0001,
+            "algorithm": "AdamW",
+            "alg_args": {},
+            "batchsize": 128,
+            "use_grad_clip": true,
+            "max_grad_norm": 1.0
+        },
+        "dim_q_hidden": 128,
+        "n_sample_importance": 12
+    }
+}

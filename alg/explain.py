@@ -169,7 +169,7 @@ class TestExplain(Experiment):
                     self.trajectory.transitions[-5:],
                     maxlen=5, thres=0.1, mode=True,
                     plotfile=str(self._file_path('causal-chain')),
-                    # to={'balancing', 'getting close'} # define target rewards here
+                    # to={'getting close'} # define target rewards here
                 )
                 # self.explainer.whynot(
                 #     self.trajectory.transitions[-5:], self.env.random_action(),
