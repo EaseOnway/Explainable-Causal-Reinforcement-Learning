@@ -44,12 +44,9 @@ def plot_data(parent_path: str, key='return', label: Optional[str] = None, color
 
 if False:
     plt.title('Cartpole', fontsize=22)
-    plot_data('experiments/cartpole/model-based-0.1', smooth=5, color='r', shift=400)
-    # plot_data('experiments/cartpole/model-based-0.2', smooth=5, color='r')
-    # plot_data('experiments/cartpole/model-based-0.3', smooth=5, color='r')
+    plot_data('experiments/cartpole/model-based-0.1', smooth=5, color='r', shift=400)'
     plot_data('experiments/cartpole/model-based-mlp', smooth=5, color='dodgerblue', shift=400)
     plot_data('experiments/cartpole/model-based-dense', smooth=5, color='forestgreen', shift=400)
-    # plot_data('experiments/cartpole/model-based-recur', smooth=5, color='lime', shift=400)
     plot_data('experiments/cartpole/model-free', smooth=5, color='gray', shift=-800)
     # plt.legend(fontsize=14)
     plt.xlabel("time steps", fontsize=18)
@@ -64,7 +61,6 @@ if False:
     plot_data('experiments/buildmarine/model-based', smooth=10, color='r', shift=600-120)
     plot_data('experiments/buildmarine/model-based-mlp', smooth=10, color='dodgerblue', shift=600-120)
     plot_data('experiments/buildmarine/model-based-dense', smooth=10, color='forestgreen', shift=600-120)
-    # plot_data('experiments/buildmarine/model-based-recur', smooth=10, color='lime', shift=600-120)
     plot_data('experiments/buildmarine/model-free', smooth=10, color='gray', shift=-120)
     # plt.legend(fontsize=14)
     plt.xlabel("time steps", fontsize=18)
@@ -79,7 +75,6 @@ if False:
     plot_data('experiments/lunarlander/model-based', smooth=10, color='r', shift=4096-2400)
     plot_data('experiments/lunarlander/model-based-mlp', smooth=10, color='dodgerblue', shift=4096-2400)
     plot_data('experiments/lunarlander/model-based-dense', smooth=10, color='forestgreen', shift=4096-2400)
-    # plot_data('experiments/buildmarine/model-based-recur', smooth=10, color='lime', shift=600-120)
     plot_data('experiments/lunarlander/model-free', smooth=10, color='gray', shift=-2400)
     # plt.legend(fontsize=14)
     plt.xlabel("time steps", fontsize=18)
