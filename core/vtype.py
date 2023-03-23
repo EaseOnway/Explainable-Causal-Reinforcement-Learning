@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Tuple, final
+from typing import Any, Dict, List, Optional, Set, Tuple, final, Final
 import numpy as np
 import abc
 import torch
@@ -313,23 +313,23 @@ class Categorical(VType):
         """        
 
         super().__init__()
-        self.__k = k
+        self.k: Final = k
         self.__ptype = ptype.Categorical(k)
-    
+
     @property
     def shape(self):
         return ()
 
     @property
     def size(self) -> int:
-        return self.__k
+        return self.k
     
     @property
     def dtype(self):
         return DType.Integar
 
     def raw2input(self, batch: torch.Tensor):
-        return torch.nn.functional.one_hot(batch, self.__k).\
+        return torch.nn.functional.one_hot(batch, self.k).\
             to(DType.Real.torch)
     
     def raw2label(self, batch: torch.Tensor):

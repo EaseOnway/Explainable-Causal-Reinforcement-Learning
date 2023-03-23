@@ -85,8 +85,16 @@ class ActionEffect(RLBase):
             except KeyError:
                 return 0.
 
-    def who_cause(self, name: str):
-        return self.__causations[name]
+    def who_cause(self, name: str, threshold: Optional[float] = None) -> Tuple[str, ...]:
+        if threshold is None:
+            return self.__causations[name]
+        else:
+            weights = self.__causal_weights[name]
+            return tuple(pa for pa in self.__causations[name] if weights[pa] >= threshold)
+
+    def graph(self, threshold: float):
+        return {name: self.who_cause(name, threshold)
+                for name in self.env.names_output}
 
     def print_info(self):
         for var in self.env.names_output:

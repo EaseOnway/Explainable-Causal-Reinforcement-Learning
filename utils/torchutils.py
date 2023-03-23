@@ -140,11 +140,11 @@ class MultiLinear(nn.Module):
         super().__init__()
         
         self.size = tuple(size)
-        self.weight = nn.Parameter(torch.empty(
+        self.weight = nn.parameter.Parameter(torch.empty(
             *size, dim_in, dim_out,
             device=device, dtype=dtype))
         if bias:
-            self.bias = nn.Parameter(torch.empty(
+            self.bias = nn.parameter.Parameter(torch.empty(
                 *size, dim_out,
                 device=device, dtype=dtype))
         else:

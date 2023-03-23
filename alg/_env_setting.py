@@ -2,6 +2,7 @@ from typing import Dict, Callable, Type
 from envs.lunar_lander import LunarLander
 from envs.sc2_biuld_marines import SC2BuildMarine
 from envs.cartpole import Cartpole
+from envs.aimtest import AimTestEnv
 from core import Env
 from learning.config import Config
 
@@ -10,6 +11,7 @@ ALL_ENVS: Dict[str, Type[Env]] = {
     'lunarlander': LunarLander,
     'cartpole': Cartpole,
     'buildmarine': SC2BuildMarine,
+    'aimtest': AimTestEnv
 }
 
 
@@ -42,7 +44,7 @@ def get_default_config(env_name: str, args):
     config.mbrl.causal_interval_max = 3
     config.mbrl.causal_interval_increase = 0.1
     config.mbrl.ensemble_size = 5
-    config.model.n_jobs_fcit = 16
+    config.model.n_jobs_fcit = 4
 
     if env_name == 'cartpole':
         config.dims.variable_encoder_hidden = 64
@@ -101,5 +103,16 @@ def get_default_config(env_name: str, args):
         config.mbrl.n_sample_warmup = 4096
         config.mbrl.n_sample_rollout = 4096
         config.mbrl.rollout_length = (1, 10)
+    elif env_name == 'aimtest':
+        config.dims.variable_encoder_hidden = 64
+        config.dims.variable_encoding = 64
+        config.dims.inferrer_key = 64
+        config.dims.inferrer_value = 64
+        config.dims.distribution_embedding = 32
+        config.dims.decoder_hidden =32
+        config.model.buffer_size = 200000
+        config.model.optim.batchsize = 1024
+        config.model.pthres = 0.2
+        # config.model.n_sample_oracle = 200000
 
     return config

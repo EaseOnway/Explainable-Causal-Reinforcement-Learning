@@ -117,7 +117,7 @@ class ModelArgs(_BaseConfig):
         self.optim = OptimArgs()
         self.prior = 0.25
         self.pthres = 0.15
-        self.n_jobs_fcit = -1
+        self.n_jobs_fcit = 1
         
 class MBRLArgs(_BaseConfig):
     def __init__(self):

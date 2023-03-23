@@ -188,7 +188,7 @@ class Train(Experiment):
         print(f"successfully loaded: {path}")
         return o
     
-    def __get_data_for_causal_discovery(self) -> NamedArrays:
+    def _get_data_for_causal_discovery(self) -> NamedArrays:
        temp = self.buffer_m.tensors[:]
        temp = {k: self.raw2input(k, v).numpy() for k, v in temp.items()}
        return temp
@@ -278,7 +278,7 @@ class Train(Experiment):
         elif self.config.ablations.mlp:
             pass
         else:
-            data = self.__get_data_for_causal_discovery()
+            data = self._get_data_for_causal_discovery()
 
             # b = self.config.model.pthres_max
             # a = self.config.model.pthres_min
